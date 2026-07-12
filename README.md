@@ -3,10 +3,12 @@
 Local Web Memory is a privacy-first browser extension for building a private,
 offline-searchable memory from user-approved webpages.
 
-Milestone 2 adds explicit local page capture. Click **Save Page** in the
+Milestone 3 adds deterministic text cleaning and chunking to explicit local
+page capture. Click **Save Page** in the
 extension popup to capture the active HTTP(S) page's title, URL, and visible
-text. Pages are stored only in extension IndexedDB and appear in the
-extension-owned dashboard. Semantic search is not implemented yet.
+text. The extension cleans text while preserving paragraphs, creates local
+chunks, and stores both in extension IndexedDB. Semantic search is not
+implemented yet.
 
 ## Install
 
@@ -51,4 +53,6 @@ data to a server.
 4. Click **Open Dashboard** to view saved pages, newest first.
 
 Saving the same page URL again updates its locally stored title, visible text,
-and save time. URL fragments are ignored; query parameters are preserved.
+chunks, and save time. URL fragments are ignored; query parameters are
+preserved. The dashboard can show local chunk previews and permanently delete a
+saved page with all of its chunks.

@@ -1,7 +1,7 @@
 import { browser, type Browser } from 'wxt/browser';
 import { upsertPage } from '../lib/database';
 import { isCaptureRequest, isExtractedPageMessage, type CaptureResponse, type ExtractedPageMessage } from '../lib/messages';
-import { canonicalizeUrl, createPageRecord, isValidProtocol, validatePageData } from '../lib/pages';
+import { canonicalizeUrl, isValidProtocol, PageContentError, preparePageForStorage, validatePageData } from '../lib/pages';
 
 type PendingCapture = {
   processing: boolean;
@@ -71,6 +71,7 @@ export default defineBackground(() => {
     const pending = pendingCaptures.get(tabId);
     if (!pending || pending.processing) return;
     pending.processing = true;
+    clearTimeout(pending.timeoutId);
 
     if (sender.frameId !== 0) {
       settleCapture(tabId, failure('INVALID_MESSAGE', 'Page capture must run in the top frame.'));
@@ -96,8 +97,20 @@ export default defineBackground(() => {
       return;
     }
 
+    let prepared;
     try {
-      const savedPage = await upsertPage(createPageRecord(message.payload));
+      prepared = preparePageForStorage(message.payload);
+    } catch (error) {
+      if (error instanceof PageContentError) {
+        settleCapture(tabId, failure('EMPTY_CONTENT', error.message));
+      } else {
+        settleCapture(tabId, failure('SAVE_FAILED', 'The page could not be prepared for local storage.'));
+      }
+      return;
+    }
+
+    try {
+      const savedPage = await upsertPage(prepared);
       if (savedPage.id === undefined) {
         throw new Error('Saved page did not receive an identifier.');
       }

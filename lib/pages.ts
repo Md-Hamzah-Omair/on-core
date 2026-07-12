@@ -1,3 +1,11 @@
+import {
+  cleanAndTruncatePageText,
+  MAX_CLEAN_TEXT_LENGTH,
+  truncateTextAtBoundary,
+  validateCleanedText,
+} from './text-cleaning';
+import { chunkText, type TextChunkDraft } from './text-chunking';
+
 export interface SavedPage {
   id?: number;
   url: string;
@@ -5,14 +13,38 @@ export interface SavedPage {
   text: string;
   savedAt: number;
   truncated: boolean;
+  cleanedTextLength: number;
+  chunkCount: number;
 }
 
-export const MAX_TEXT_LENGTH = 500000;
+export interface PageCaptureData {
+  title: string;
+  url: string;
+  text: string;
+  truncated: boolean;
+}
+
+export interface PreparedPage {
+  page: Omit<SavedPage, 'id' | 'savedAt'>;
+  chunks: TextChunkDraft[];
+}
+
+export class PageContentError extends Error {
+  constructor(readonly reason: 'EMPTY_CONTENT' | 'CONTENT_TOO_SHORT') {
+    super(reason === 'EMPTY_CONTENT' ? 'No visible text found on page.' : 'The page does not contain enough visible text to save.');
+  }
+}
+
+export const MAX_TEXT_LENGTH = MAX_CLEAN_TEXT_LENGTH;
 export const MAX_TITLE_LENGTH = 1000;
 export const MAX_URL_LENGTH = 8192;
 
 export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
+}
+
+export function normalizePageTitle(title: string): string {
+  return truncateTextAtBoundary(normalizeWhitespace(title), MAX_TITLE_LENGTH);
 }
 
 export function isValidProtocol(urlStr: string): boolean {
@@ -31,16 +63,7 @@ export function canonicalizeUrl(urlStr: string): string {
 }
 
 export function truncateText(text: string): { text: string; truncated: boolean } {
-  if (text.length > MAX_TEXT_LENGTH) {
-    return {
-      text: text.slice(0, MAX_TEXT_LENGTH),
-      truncated: true,
-    };
-  }
-  return {
-    text,
-    truncated: false,
-  };
+  return cleanAndTruncatePageText(text);
 }
 
 export function validatePageData(data: { title: string; url: string; text: string }): {
@@ -51,53 +74,35 @@ export function validatePageData(data: { title: string; url: string; text: strin
     return { valid: false, error: 'Invalid data types' };
   }
 
-  const trimmedTitle = data.title.trim();
   const trimmedUrl = data.url.trim();
-  const trimmedText = data.text.trim();
-
-  if (!trimmedUrl) {
-    return { valid: false, error: 'Empty URL' };
-  }
-
-  if (!isValidProtocol(trimmedUrl)) {
-    return { valid: false, error: 'Unsupported URL protocol' };
-  }
-
-  if (!trimmedTitle) {
-    return { valid: false, error: 'Empty page title' };
-  }
-
-  if (!trimmedText) {
-    return { valid: false, error: 'No visible text found on page' };
-  }
-
-  if (trimmedTitle.length > MAX_TITLE_LENGTH) {
-    return { valid: false, error: `Title exceeds character limit (${MAX_TITLE_LENGTH})` };
-  }
-
-  if (trimmedUrl.length > MAX_URL_LENGTH) {
-    return { valid: false, error: `URL exceeds character limit (${MAX_URL_LENGTH})` };
-  }
-
-  if (data.text.length > MAX_TEXT_LENGTH) {
-    return { valid: false, error: `Text exceeds character limit (${MAX_TEXT_LENGTH})` };
-  }
+  if (!trimmedUrl) return { valid: false, error: 'Empty URL' };
+  if (!isValidProtocol(trimmedUrl)) return { valid: false, error: 'Unsupported URL protocol' };
+  if (!normalizeWhitespace(data.title)) return { valid: false, error: 'Empty page title' };
+  if (!data.text.trim()) return { valid: false, error: 'No visible text found on page' };
+  if (data.title.length > MAX_TITLE_LENGTH) return { valid: false, error: `Title exceeds character limit (${MAX_TITLE_LENGTH})` };
+  if (data.url.length > MAX_URL_LENGTH) return { valid: false, error: `URL exceeds character limit (${MAX_URL_LENGTH})` };
+  if (data.text.length > MAX_TEXT_LENGTH) return { valid: false, error: `Text exceeds character limit (${MAX_TEXT_LENGTH})` };
 
   return { valid: true };
 }
 
-export function createPageRecord(data: {
-  title: string;
-  url: string;
-  text: string;
-  truncated: boolean;
-}): Omit<SavedPage, 'id' | 'savedAt'> {
-  const { text, truncated } = truncateText(normalizeWhitespace(data.text));
+export function preparePageForStorage(data: PageCaptureData): PreparedPage {
+  const cleaned = cleanAndTruncatePageText(data.text);
+  const validation = validateCleanedText(cleaned.text);
+  if (!validation.valid) {
+    throw new PageContentError(validation.reason);
+  }
 
+  const chunks = chunkText(cleaned.text);
   return {
-    url: canonicalizeUrl(data.url),
-    title: normalizeWhitespace(data.title),
-    text,
-    truncated: data.truncated || truncated,
+    page: {
+      url: canonicalizeUrl(data.url),
+      title: normalizePageTitle(data.title),
+      text: cleaned.text,
+      truncated: data.truncated || cleaned.truncated,
+      cleanedTextLength: cleaned.text.length,
+      chunkCount: chunks.length,
+    },
+    chunks,
   };
 }

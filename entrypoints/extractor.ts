@@ -1,22 +1,22 @@
 import { browser } from 'wxt/browser';
-import { canonicalizeUrl, normalizeWhitespace, truncateText } from '../lib/pages';
+import { canonicalizeUrl, normalizePageTitle } from '../lib/pages';
+import { cleanAndTruncatePageText } from '../lib/text-cleaning';
 import type { ExtractedPageMessage } from '../lib/messages';
 
 export default defineUnlistedScript(() => {
   try {
-    const title = document.title ? document.title.trim() : 'Untitled Page';
+    const title = normalizePageTitle(document.title) || 'Untitled Page';
     const rawUrl = window.location.href;
     const bodyText = document.body ? document.body.innerText : '';
 
     const url = canonicalizeUrl(rawUrl);
-    const cleanText = normalizeWhitespace(bodyText);
-    const { text, truncated } = truncateText(cleanText);
+    const { text, truncated } = cleanAndTruncatePageText(bodyText);
 
     const message: ExtractedPageMessage = {
       type: 'PAGE_EXTRACTED',
       version: 1,
       payload: {
-        title: title || 'Untitled Page',
+        title,
         url,
         text,
         truncated,

@@ -220,6 +220,88 @@ input {
   word-break: break-word;
 }
 
+.card-metadata {
+  margin: 12px 0 0;
+  color: #718179;
+  font-size: 0.8rem;
+}
+
+.card-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.chunk-toggle,
+.delete-page {
+  border: 1px solid #a9b4aa;
+  border-radius: 5px;
+  padding: 7px 10px;
+  background: transparent;
+  color: #18352c;
+  font: inherit;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.chunk-toggle:hover:not(:disabled) {
+  background: #edf0e8;
+}
+
+.delete-page {
+  border-color: #b95242;
+  color: #a13526;
+}
+
+.delete-page:hover:not(:disabled) {
+  background: #fcefeb;
+}
+
+.delete-page:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.page-error {
+  margin: 12px 0 0;
+  color: #a13526;
+  font-size: 0.85rem;
+}
+
+.chunk-preview {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  border-top: 1px solid #e1dacb;
+  padding-top: 16px;
+}
+
+.chunk-item {
+  border-left: 2px solid #d6dfc9;
+  padding-left: 12px;
+}
+
+.chunk-item strong,
+.chunk-item span {
+  font-size: 0.75rem;
+}
+
+.chunk-item span {
+  margin-left: 8px;
+  color: #718179;
+}
+
+.chunk-item p,
+.chunk-empty {
+  margin: 6px 0 0;
+  color: #52675f;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .badge {
   display: inline-block;
   margin-top: 12px;

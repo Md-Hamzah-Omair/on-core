@@ -1,16 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalizeUrl,
-  createPageRecord,
   isValidProtocol,
   normalizeWhitespace,
+  PageContentError,
+  preparePageForStorage,
   truncateText,
   validatePageData,
   MAX_TEXT_LENGTH,
 } from './pages';
 
 describe('pages domain helpers', () => {
-  it('normalizes multiple spaces, tabs, and newlines into a single space', () => {
+  it('normalizes page titles into one line', () => {
     const raw = '  Hello \n\n world  \t  this is\r \r a test  ';
     expect(normalizeWhitespace(raw)).toBe('Hello world this is a test');
   });
@@ -54,17 +55,39 @@ describe('pages domain helpers', () => {
     expect(validatePageData({ ...valid, text: 'a'.repeat(MAX_TEXT_LENGTH + 1) }).valid).toBe(false);
   });
 
-  it('builds a normalized, fragment-free page record and retains truncation', () => {
-    expect(createPageRecord({
+  it('prepares a cleaned, fragment-free page record with chunks', () => {
+    const prepared = preparePageForStorage({
       title: '  A\nPage  ',
       url: 'https://example.com/article?ref=home#comments',
-      text: ' First\n\nsecond ',
-      truncated: true,
-    })).toEqual({
-      title: 'A Page',
-      url: 'https://example.com/article?ref=home',
-      text: 'First second',
+      text: ' First paragraph contains enough visible content.\n\nsecond paragraph also contains enough content. ',
       truncated: true,
     });
+
+    expect(prepared).toMatchObject({
+      page: {
+        title: 'A Page',
+        url: 'https://example.com/article?ref=home',
+        text: 'First paragraph contains enough visible content.\n\nsecond paragraph also contains enough content.',
+        truncated: true,
+        cleanedTextLength: prepared.page.text.length,
+        chunkCount: 1,
+      },
+      chunks: [{ position: 0 }],
+    });
+  });
+
+  it('rejects empty and near-empty cleaned page content', () => {
+    expect(() => preparePageForStorage({
+      title: 'Title',
+      url: 'https://example.com',
+      text: '   ',
+      truncated: false,
+    })).toThrow(PageContentError);
+    expect(() => preparePageForStorage({
+      title: 'Title',
+      url: 'https://example.com',
+      text: 'Too short',
+      truncated: false,
+    })).toThrow(PageContentError);
   });
 });
