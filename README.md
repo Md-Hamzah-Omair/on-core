@@ -3,9 +3,10 @@
 Local Web Memory is a privacy-first browser extension for building a private,
 offline-searchable memory from user-approved webpages.
 
-Milestone 1 provides only the runnable extension foundation: a popup, an
-extension-owned dashboard, and a minimal Manifest V3 background worker. Page
-capture and semantic search are not implemented yet.
+Milestone 2 adds explicit local page capture. Click **Save Page** in the
+extension popup to capture the active HTTP(S) page's title, URL, and visible
+text. Pages are stored only in extension IndexedDB and appear in the
+extension-owned dashboard. Semantic search is not implemented yet.
 
 ## Install
 
@@ -38,4 +39,16 @@ pnpm build
 4. Select **Load unpacked**.
 5. Choose `.output/chrome-mv3` from this repository.
 
-The extension requests no browser permissions or host access in Milestone 1.
+The extension requests only `activeTab` and `scripting` to capture the page the
+user explicitly saves. It requests no host permissions and sends no browsing
+data to a server.
+
+## Capture a page
+
+1. Open a normal HTTP or HTTPS webpage.
+2. Open the Local Web Memory popup.
+3. Click **Save Page** and wait for the success message.
+4. Click **Open Dashboard** to view saved pages, newest first.
+
+Saving the same page URL again updates its locally stored title, visible text,
+and save time. URL fragments are ignored; query parameters are preserved.

@@ -1,1 +1,2 @@
-// Reserved for the later, explicitly user-triggered page extraction entry point.
+// Reserved for a future persistent content script. Milestone 2 uses extractor.ts
+// only through explicit programmatic injection after the user clicks Save Page.

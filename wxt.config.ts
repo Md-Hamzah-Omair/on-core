@@ -6,7 +6,7 @@ export default defineConfig({
   manifest: {
     name: 'Local Web Memory',
     description: 'A private, local-first memory for the web.',
-    permissions: [],
+    permissions: ['activeTab', 'scripting'],
     host_permissions: [],
   },
 });
