@@ -5,9 +5,18 @@ import {
   validateCleanedText,
 } from './text-cleaning';
 import { chunkText, type TextChunkDraft } from './text-chunking';
+import type { IndexingPhase, IndexingStatus } from './indexing';
 
 export interface SavedPage {
+  contentRevision: number;
+  embeddingModelId: string;
+  embeddingModelRevision: string;
+  embeddingVersion: number;
   id?: number;
+  indexedChunkCount: number;
+  indexingError?: string;
+  indexingPhase: IndexingPhase;
+  indexingStatus: IndexingStatus;
   url: string;
   title: string;
   text: string;
@@ -25,7 +34,19 @@ export interface PageCaptureData {
 }
 
 export interface PreparedPage {
-  page: Omit<SavedPage, 'id' | 'savedAt'>;
+  page: Omit<
+    SavedPage,
+    | 'contentRevision'
+    | 'embeddingModelId'
+    | 'embeddingModelRevision'
+    | 'embeddingVersion'
+    | 'id'
+    | 'indexedChunkCount'
+    | 'indexingError'
+    | 'indexingPhase'
+    | 'indexingStatus'
+    | 'savedAt'
+  >;
   chunks: TextChunkDraft[];
 }
 

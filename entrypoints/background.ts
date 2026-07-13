@@ -1,7 +1,23 @@
 import { browser, type Browser } from 'wxt/browser';
-import { upsertPage } from '../lib/database';
-import { isCaptureRequest, isExtractedPageMessage, type CaptureResponse, type ExtractedPageMessage } from '../lib/messages';
-import { canonicalizeUrl, isValidProtocol, PageContentError, preparePageForStorage, validatePageData } from '../lib/pages';
+import { hasPendingIndexingWork, recoverInterruptedIndexing, retryPageIndexing, upsertPage } from '../lib/database';
+import { closeOffscreenDocument } from '../lib/offscreen-lifecycle';
+import {
+  isCaptureRequest,
+  isCloseOffscreenDocumentRequest,
+  isExtractedPageMessage,
+  isRetryIndexingRequest,
+  isRunEmbeddingProbeRequest,
+  type CaptureResponse,
+  type ExtractedPageMessage,
+} from '../lib/messages';
+import {
+  canonicalizeUrl,
+  isValidProtocol,
+  PageContentError,
+  preparePageForStorage,
+  type PreparedPage,
+  validatePageData,
+} from '../lib/pages';
 
 type PendingCapture = {
   processing: boolean;
@@ -15,6 +31,44 @@ function failure(code: Extract<CaptureResponse, { ok: false }>['code'], message:
 
 export default defineBackground(() => {
   const pendingCaptures = new Map<number, PendingCapture>();
+
+  async function ensureOffscreenIndexer() {
+    try {
+      await browser.offscreen.createDocument({
+        justification: 'Generate local embeddings outside the service worker.',
+        reasons: ['WORKERS'],
+        url: browser.runtime.getURL('/offscreen.html'),
+      });
+    } catch {
+      // Chrome rejects creation when the one allowed offscreen document already exists.
+    }
+
+    await browser.runtime.sendMessage({ type: 'RUN_INDEXING_QUEUE', version: 1 });
+  }
+
+  async function closeIndexerIfRequested(sender: Browser.runtime.MessageSender) {
+    if (sender.url !== browser.runtime.getURL('/offscreen.html')) return;
+    await closeOffscreenDocument(
+      browser.offscreen,
+      (error) => console.error('Could not close the offscreen indexing document.', error),
+    );
+  }
+
+  async function runEmbeddingProbe(sender: Browser.runtime.MessageSender) {
+    const extensionRoot = new URL('/', browser.runtime.getURL('/')).toString();
+    if (!sender.url?.startsWith(extensionRoot)) throw new Error('Embedding probe must be requested by an extension page.');
+    await ensureOffscreenIndexer();
+    return browser.runtime.sendMessage({ type: 'RUN_EMBEDDING_PROBE_OFFSCREEN', version: 1 });
+  }
+
+  async function resumeIndexing() {
+    await recoverInterruptedIndexing();
+    if (await hasPendingIndexingWork()) {
+      await ensureOffscreenIndexer();
+    }
+  }
+
+  void resumeIndexing();
 
   function settleCapture(tabId: number, response: CaptureResponse) {
     const pending = pendingCaptures.get(tabId);
@@ -97,7 +151,7 @@ export default defineBackground(() => {
       return;
     }
 
-    let prepared;
+    let prepared: PreparedPage;
     try {
       prepared = preparePageForStorage(message.payload);
     } catch (error) {
@@ -115,6 +169,7 @@ export default defineBackground(() => {
         throw new Error('Saved page did not receive an identifier.');
       }
 
+      void ensureOffscreenIndexer();
       settleCapture(tabId, {
         ok: true,
         page: {
@@ -134,6 +189,29 @@ export default defineBackground(() => {
       void captureActivePage()
         .then(sendResponse)
         .catch(() => sendResponse(failure('SAVE_FAILED', 'Could not start page capture. Please try again.')));
+      return true;
+    }
+
+    if (isRetryIndexingRequest(message)) {
+      void retryPageIndexing(message.pageId)
+        .then(ensureOffscreenIndexer)
+        .then(() => sendResponse({ ok: true }))
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+
+    if (isCloseOffscreenDocumentRequest(message)) {
+      void closeIndexerIfRequested(sender);
+      return;
+    }
+
+    if (isRunEmbeddingProbeRequest(message)) {
+      void runEmbeddingProbe(sender)
+        .then(sendResponse)
+        .catch((error: unknown) => sendResponse({
+          ok: false,
+          message: error instanceof Error ? error.message : 'Embedding probe failed.',
+        }));
       return true;
     }
 

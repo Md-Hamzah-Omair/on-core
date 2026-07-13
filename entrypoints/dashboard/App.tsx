@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { browser } from 'wxt/browser';
 import { deletePage, getPageChunks, getSavedPages } from '../../lib/database';
 import { PROJECT_NAME, SEARCH_PLACEHOLDER } from '../../lib/project';
 import type { SavedPage } from '../../lib/pages';
@@ -13,6 +14,8 @@ export default function App() {
   const [loadingChunkPageId, setLoadingChunkPageId] = useState<number | null>(null);
   const [pageErrors, setPageErrors] = useState<Record<number, string>>({});
   const [deletingPageId, setDeletingPageId] = useState<number | null>(null);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [retryingPageId, setRetryingPageId] = useState<number | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -25,9 +28,6 @@ export default function App() {
         const saved = await getSavedPages();
         if (isMounted) {
           setPages(saved);
-          setExpandedPageId(null);
-          setChunkPreviews({});
-          setPageErrors({});
         }
       } catch {
         if (isMounted) setError('Saved pages could not be loaded from local storage.');
@@ -46,7 +46,16 @@ export default function App() {
       isMounted = false;
       window.removeEventListener('focus', refreshOnFocus);
     };
-  }, []);
+  }, [refreshKey]);
+
+  useEffect(() => {
+    if (!pages.some((page) => page.indexingStatus === 'pending' || page.indexingStatus === 'indexing')) return;
+
+    const intervalId = setInterval(() => {
+      setRefreshKey((value) => value + 1);
+    }, 1000);
+    return () => clearInterval(intervalId);
+  }, [pages]);
 
   async function toggleChunks(pageId: number) {
     if (expandedPageId === pageId) {
@@ -90,6 +99,24 @@ export default function App() {
     }
   }
 
+  async function retryIndexing(pageId: number) {
+    setRetryingPageId(pageId);
+    setPageErrors((current) => ({ ...current, [pageId]: '' }));
+    try {
+      const response = await browser.runtime.sendMessage({
+        pageId,
+        type: 'RETRY_PAGE_INDEXING',
+        version: 1,
+      }) as { ok?: boolean };
+      if (!response.ok) throw new Error('Retry was rejected.');
+      setRefreshKey((value) => value + 1);
+    } catch {
+      setPageErrors((current) => ({ ...current, [pageId]: 'Indexing could not be restarted. Please try again.' }));
+    } finally {
+      setRetryingPageId(null);
+    }
+  }
+
   function getHostname(urlStr: string): string {
     try {
       return new URL(urlStr).hostname;
@@ -109,6 +136,14 @@ export default function App() {
     return text.length > 200 ? `${text.slice(0, 200)}...` : text;
   }
 
+  function indexingLabel(page: SavedPage): string {
+    if (page.indexingStatus === 'indexed') return 'Indexed';
+    if (page.indexingStatus === 'failed') return 'Failed';
+    if (page.indexingPhase === 'loading-model') return 'Loading model';
+    if (page.indexingStatus === 'indexing') return `Indexing ${page.indexedChunkCount} of ${page.chunkCount}`;
+    return 'Not indexed';
+  }
+
   return (
     <main>
       <header className="dashboard-header">
@@ -118,7 +153,7 @@ export default function App() {
 
       <div className="layout-grid">
         <section className="hero-section">
-          <p className="eyebrow">Milestone 3: Clean Text</p>
+          <p className="eyebrow">Milestone 4: Local Embeddings</p>
           <h1>Your corner of the web,<br />remembered locally.</h1>
 
           <div className="search-box">
@@ -127,8 +162,8 @@ export default function App() {
           </div>
 
           <aside className="milestone-badge">
-            <strong>Structured Local Storage</strong>
-            <p>Captured text is cleaned and split into local chunks. Semantic search is scheduled for a future milestone.</p>
+            <strong>Local Indexing</strong>
+            <p>Chunks are embedded locally on this device. Semantic search is scheduled for a future milestone.</p>
           </aside>
         </section>
 
@@ -165,6 +200,9 @@ export default function App() {
                     <p className="card-metadata">
                       {(page.cleanedTextLength ?? page.text.length).toLocaleString()} cleaned characters · {page.chunkCount ?? 0} chunks
                     </p>
+                    <p className={`indexing-status indexing-status-${page.indexingStatus}`}>
+                      {indexingLabel(page)} · {page.indexedChunkCount} of {page.chunkCount} embedded
+                    </p>
 
                     {page.truncated && (
                       <span className="badge badge-warning" title="This page was very large and was truncated to 500,000 characters.">
@@ -191,6 +229,16 @@ export default function App() {
                         >
                           {isDeleting ? 'Deleting...' : 'Delete'}
                         </button>
+                        {page.indexingStatus !== 'indexed' && (
+                          <button
+                            type="button"
+                            className="retry-indexing"
+                            disabled={retryingPageId === pageId}
+                            onClick={() => void retryIndexing(pageId)}
+                          >
+                            {retryingPageId === pageId ? 'Retrying...' : 'Retry indexing'}
+                          </button>
+                        )}
                       </div>
                     )}
 
@@ -207,6 +255,7 @@ export default function App() {
                             <div key={chunk.position} className="chunk-item">
                               <strong>Chunk {chunk.position + 1}</strong>
                               <span>{chunk.characterCount.toLocaleString()} characters</span>
+                              <span>{chunk.embeddingStatus}{chunk.embeddingDimension ? ` · ${chunk.embeddingDimension} dimensions` : ''}</span>
                               <p>{chunk.text}</p>
                             </div>
                           ))

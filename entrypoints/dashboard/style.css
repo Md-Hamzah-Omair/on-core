@@ -226,6 +226,20 @@ input {
   font-size: 0.8rem;
 }
 
+.indexing-status {
+  margin: 6px 0 0;
+  color: #718179;
+  font-size: 0.8rem;
+}
+
+.indexing-status-indexed {
+  color: #38734d;
+}
+
+.indexing-status-failed {
+  color: #a13526;
+}
+
 .card-actions {
   display: flex;
   gap: 10px;
@@ -233,7 +247,8 @@ input {
 }
 
 .chunk-toggle,
-.delete-page {
+.delete-page,
+.retry-indexing {
   border: 1px solid #a9b4aa;
   border-radius: 5px;
   padding: 7px 10px;
@@ -261,6 +276,15 @@ input {
 .delete-page:disabled {
   cursor: wait;
   opacity: 0.65;
+}
+
+.retry-indexing {
+  border-color: #d05b35;
+  color: #a1462b;
+}
+
+.retry-indexing:hover:not(:disabled) {
+  background: #fdf5e6;
 }
 
 .page-error {

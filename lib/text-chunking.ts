@@ -15,6 +15,15 @@ export interface TextChunkDraft {
 }
 
 export interface StoredTextChunk extends TextChunkDraft {
+  contentRevision: number;
+  embedding?: Float32Array;
+  embeddingDimension?: number;
+  embeddingError?: string;
+  embeddingModelId?: string;
+  embeddingModelRevision?: string;
+  embeddingStatus: IndexingStatus;
+  embeddingVersion?: number;
+  indexingStartedAt?: number;
   pageId: number;
 }
 
@@ -217,3 +226,4 @@ export function chunkText(
     };
   });
 }
+import type { IndexingStatus } from './indexing';
