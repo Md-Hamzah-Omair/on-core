@@ -5,6 +5,8 @@ import { derivePageIndexingState, isChunkIndexed, type IndexingPhase } from './i
 import { chunkText, type StoredTextChunk } from './text-chunking';
 import { cleanAndTruncatePageText, validateCleanedText } from './text-cleaning';
 import type { PreparedPage, SavedPage } from './pages';
+import { MAX_SEARCH_CANDIDATE_CHUNKS, type SemanticSearchCandidate } from './semantic-search';
+import type { LocalDataSummary } from './privacy-settings';
 
 type PagesTable = Table<SavedPage, number>;
 type ChunksTable = Table<StoredTextChunk, [number, number]>;
@@ -145,6 +147,48 @@ export async function getSavedPages(): Promise<SavedPage[]> {
 
 export async function getPageChunks(pageId: number): Promise<StoredTextChunk[]> {
   return db.chunks.where('pageId').equals(pageId).sortBy('position');
+}
+
+export async function getLocalDataSummary(): Promise<LocalDataSummary> {
+  return db.transaction('r', db.pages, db.chunks, async () => {
+    const pageStatuses = { failed: 0, indexed: 0, indexing: 0, pending: 0 };
+    const chunkStatuses = { failed: 0, indexed: 0, indexing: 0, pending: 0 };
+    await db.pages.each((page) => { pageStatuses[page.indexingStatus] += 1; });
+    await db.chunks.each((chunk) => { chunkStatuses[chunk.embeddingStatus] += 1; });
+    return {
+      chunkCount: Object.values(chunkStatuses).reduce((total, count) => total + count, 0),
+      chunkStatuses,
+      pageCount: Object.values(pageStatuses).reduce((total, count) => total + count, 0),
+      pageStatuses,
+    };
+  });
+}
+
+export async function getSemanticSearchCandidates(): Promise<SemanticSearchCandidate[]> {
+  return db.transaction('r', db.pages, db.chunks, async () => {
+    const indexedChunks = await db.chunks.where('embeddingStatus').equals('indexed').toArray();
+    if (indexedChunks.length > MAX_SEARCH_CANDIDATE_CHUNKS) {
+      throw new RangeError('SEARCH_CAPACITY_EXCEEDED');
+    }
+    const pageIds = [...new Set(indexedChunks.map((chunk) => chunk.pageId))].sort((left, right) => left - right);
+    const pages = await db.pages.bulkGet(pageIds);
+    const pageMap = new Map(pages.flatMap((page) => page?.id === undefined ? [] : [[page.id, page] as const]));
+    return indexedChunks
+      .sort((left, right) => left.pageId - right.pageId || left.position - right.position)
+      .flatMap((chunk) => {
+        const page = pageMap.get(chunk.pageId);
+        if (!page || page.id !== chunk.pageId || !isCurrentEmbeddingMetadata(page) || !isChunkIndexed(chunk, page.contentRevision) || !chunk.text.trim()) return [];
+        return [{
+          embedding: chunk.embedding!,
+          pageId: page.id,
+          position: chunk.position,
+          savedAt: page.savedAt,
+          text: chunk.text,
+          title: page.title,
+          url: page.url,
+        }];
+      });
+  });
 }
 
 export async function hasPendingIndexingWork(): Promise<boolean> {
@@ -308,10 +352,10 @@ export async function markEmbeddingItemsFailed(items: EmbeddingWorkItem[], error
   });
 }
 
-export async function retryPageIndexing(pageId: number): Promise<void> {
-  await db.transaction('rw', db.pages, db.chunks, async () => {
+export async function retryPageIndexing(pageId: number): Promise<boolean> {
+  return db.transaction('rw', db.pages, db.chunks, async () => {
     const page = await db.pages.get(pageId);
-    if (!page) return;
+    if (!page) return false;
 
     const chunks = await db.chunks.where('pageId').equals(pageId).toArray();
     for (const chunk of chunks) {
@@ -330,6 +374,7 @@ export async function retryPageIndexing(pageId: number): Promise<void> {
     }
 
     await synchronizePageIndexingState(db.pages, db.chunks, pageId);
+    return true;
   });
 }
 
@@ -337,5 +382,12 @@ export async function deletePage(pageId: number): Promise<void> {
   await db.transaction('rw', db.pages, db.chunks, async () => {
     await db.chunks.where('pageId').equals(pageId).delete();
     await db.pages.delete(pageId);
+  });
+}
+
+export async function deleteAllLocalData(): Promise<void> {
+  await db.transaction('rw', db.pages, db.chunks, async () => {
+    await db.chunks.clear();
+    await db.pages.clear();
   });
 }

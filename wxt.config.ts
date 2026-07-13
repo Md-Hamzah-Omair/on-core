@@ -15,7 +15,7 @@ export default defineConfig({
     permissions: ['activeTab', 'scripting', 'offscreen'],
     host_permissions: [],
     content_security_policy: {
-      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'; worker-src 'self'",
+      extension_pages: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'",
     },
   },
 });

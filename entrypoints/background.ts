@@ -1,5 +1,5 @@
 import { browser, type Browser } from 'wxt/browser';
-import { hasPendingIndexingWork, recoverInterruptedIndexing, retryPageIndexing, upsertPage } from '../lib/database';
+import { deleteAllLocalData, hasPendingIndexingWork, recoverInterruptedIndexing, retryPageIndexing, upsertPage } from '../lib/database';
 import { closeOffscreenDocument } from '../lib/offscreen-lifecycle';
 import {
   isCaptureRequest,
@@ -7,6 +7,9 @@ import {
   isExtractedPageMessage,
   isRetryIndexingRequest,
   isRunEmbeddingProbeRequest,
+  isSearchMemoryRequest,
+  isCancelSearchRequest,
+  isDeleteAllLocalDataRequest,
   type CaptureResponse,
   type ExtractedPageMessage,
 } from '../lib/messages';
@@ -59,6 +62,16 @@ export default defineBackground(() => {
     if (!sender.url?.startsWith(extensionRoot)) throw new Error('Embedding probe must be requested by an extension page.');
     await ensureOffscreenIndexer();
     return browser.runtime.sendMessage({ type: 'RUN_EMBEDDING_PROBE_OFFSCREEN', version: 1 });
+  }
+
+  function isExtensionPage(sender: Browser.runtime.MessageSender): boolean {
+    return sender.url?.startsWith(new URL('/', browser.runtime.getURL('/')).toString()) ?? false;
+  }
+
+  async function runSearch(message: { requestId: string; query: string; limit: number }, sender: Browser.runtime.MessageSender) {
+    if (!isExtensionPage(sender)) throw new Error('SEARCH_FAILED');
+    await ensureOffscreenIndexer();
+    return browser.runtime.sendMessage({ ...message, type: 'SEARCH_MEMORY_OFFSCREEN', version: 1 });
   }
 
   async function resumeIndexing() {
@@ -194,7 +207,14 @@ export default defineBackground(() => {
 
     if (isRetryIndexingRequest(message)) {
       void retryPageIndexing(message.pageId)
-        .then(ensureOffscreenIndexer)
+        .then((found) => found ? ensureOffscreenIndexer().then(() => ({ ok: true })) : ({ ok: false, code: 'PAGE_NOT_FOUND' }))
+        .then(sendResponse)
+        .catch(() => sendResponse({ ok: false }));
+      return true;
+    }
+
+    if (isDeleteAllLocalDataRequest(message)) {
+      void deleteAllLocalData()
         .then(() => sendResponse({ ok: true }))
         .catch(() => sendResponse({ ok: false }));
       return true;
@@ -213,6 +233,18 @@ export default defineBackground(() => {
           message: error instanceof Error ? error.message : 'Embedding probe failed.',
         }));
       return true;
+    }
+
+    if (isSearchMemoryRequest(message)) {
+      void runSearch(message, sender).then(sendResponse).catch((error: unknown) => sendResponse({ ok: false, requestId: message.requestId, code: error instanceof Error ? error.message : 'SEARCH_FAILED' }));
+      return true;
+    }
+
+    if (isCancelSearchRequest(message)) {
+      if (isExtensionPage(sender)) {
+        void browser.runtime.sendMessage({ requestId: message.requestId, type: 'CANCEL_SEARCH_OFFSCREEN', version: 1 });
+      }
+      return;
     }
 
     if (isExtractedPageMessage(message)) {

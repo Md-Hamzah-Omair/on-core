@@ -1,7 +1,7 @@
 import { browser } from 'wxt/browser';
 import EmbeddingWorker from '../../workers/embedding.worker?worker';
 import { requestOffscreenClose } from '../../lib/offscreen-lifecycle';
-import { isRunEmbeddingProbeOffscreenRequest, isRunIndexingQueueRequest } from '../../lib/messages';
+import { isCancelSearchOffscreenRequest, isRunEmbeddingProbeOffscreenRequest, isRunIndexingQueueRequest, isSearchMemoryOffscreenRequest } from '../../lib/messages';
 import { IndexingController } from './indexing-controller';
 
 const controller = new IndexingController(
@@ -44,6 +44,17 @@ browser.runtime.onMessage.addListener((message) => {
         console.error('Embedding runtime probe failed.', error);
         return { ok: false, message: error instanceof Error ? error.message : 'Embedding probe failed.' };
       });
+  }
+  if (isCancelSearchOffscreenRequest(message)) {
+    controller.cancelSearch(message.requestId);
+    return Promise.resolve({ ok: true, requestId: message.requestId });
+  }
+  if (isSearchMemoryOffscreenRequest(message)) {
+    if (closeTimer) clearTimeout(closeTimer);
+    return controller.search(message.requestId, message.query, message.limit)
+      .then((result) => ({ ok: true, requestId: message.requestId, ...result }))
+      .catch((error: unknown) => ({ ok: false, requestId: message.requestId, code: error instanceof Error ? error.message : 'SEARCH_FAILED' }))
+      .finally(scheduleClose);
   }
 });
 

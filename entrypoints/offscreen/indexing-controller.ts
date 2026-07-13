@@ -2,6 +2,7 @@ import { EmbeddingClient, type EmbeddingWorkerFactory } from '../../lib/embeddin
 import {
   claimPendingEmbeddings,
   commitEmbeddingResults,
+  getSemanticSearchCandidates,
   hasPendingIndexingWork,
   markAllPendingEmbeddingsFailed,
   markEmbeddingItemsFailed,
@@ -9,11 +10,14 @@ import {
   setPagesIndexingPhase,
 } from '../../lib/database';
 import { EMBEDDING_DIMENSION } from '../../lib/embeddings';
+import { rankSemanticSearch, validateSearchQuery, validateSearchResultLimit, type SemanticSearchResult } from '../../lib/semantic-search';
 
 export class IndexingController {
   private activePageIds: number[] = [];
   private client: EmbeddingClient;
   private running = false;
+  private cancelledSearches = new Set<string>();
+  private inference = Promise.resolve();
 
   constructor(
     private readonly createWorker: EmbeddingWorkerFactory,
@@ -28,7 +32,8 @@ export class IndexingController {
   }
 
   async runProbe(): Promise<{ dimension: number; norm: number }> {
-    await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
+    return this.withInference(async () => {
+      await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
     const [result] = await this.client.embedBatch([{
       contentRevision: 1,
       pageId: 1,
@@ -41,7 +46,28 @@ export class IndexingController {
 
     let sumOfSquares = 0;
     for (const value of result.embedding) sumOfSquares += value * value;
-    return { dimension: result.embedding.length, norm: Math.sqrt(sumOfSquares) };
+      return { dimension: result.embedding.length, norm: Math.sqrt(sumOfSquares) };
+    });
+  }
+
+  cancelSearch(requestId: string) {
+    this.cancelledSearches.add(requestId);
+  }
+
+  async search(requestId: string, query: string, limit: number): Promise<{ results: SemanticSearchResult[]; status: 'no-indexed-content' | 'results' | 'no-results' }> {
+    const validation = validateSearchQuery(query);
+    if (!validation.valid || !validateSearchResultLimit(limit)) throw new Error('INVALID_QUERY');
+    const candidates = await getSemanticSearchCandidates();
+    if (candidates.length === 0) return { results: [], status: 'no-indexed-content' };
+    if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
+    const embedding = await this.withInference(async () => {
+      if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
+      await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
+      return this.client.embedQuery(validation.normalized);
+    });
+    if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
+    const results = rankSemanticSearch(embedding, candidates, limit);
+    return { results, status: results.length ? 'results' : 'no-results' };
   }
 
   async run(): Promise<void> {
@@ -56,7 +82,7 @@ export class IndexingController {
 
         this.activePageIds = [...new Set(items.map((item) => item.pageId))];
         try {
-          await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
+          await this.withInference(() => this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl));
         } catch {
           await markAllPendingEmbeddingsFailed('MODEL_LOAD_FAILED');
           this.client.dispose();
@@ -66,7 +92,7 @@ export class IndexingController {
 
         try {
           await setPagesIndexingPhase(this.activePageIds, 'embedding');
-          await commitEmbeddingResults(await this.client.embedBatch(items));
+          await commitEmbeddingResults(await this.withInference(() => this.client.embedBatch(items)));
         } catch {
           await markEmbeddingItemsFailed(items, 'WORKER_FAILED');
           this.client.dispose();
@@ -91,5 +117,17 @@ export class IndexingController {
         void setPagesIndexingPhase(this.activePageIds, 'loading-model');
       }
     });
+  }
+
+  private async withInference<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.inference;
+    let release!: () => void;
+    this.inference = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
   }
 }

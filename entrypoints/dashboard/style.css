@@ -94,6 +94,20 @@ input {
   font: inherit;
 }
 
+.search-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.search-actions button, .search-actions select, .open-original { border: 1px solid #a9b4aa; border-radius: 5px; padding: 7px 10px; background: transparent; color: #18352c; font: inherit; font-size: .8rem; font-weight: 700; }
+.search-actions button { cursor: pointer; }
+.search-state, .semantic-label { color: #718179; font-size: .8rem; margin: 8px 0 0; }
+.semantic-label { color: #38734d; font-weight: 700; }
+.semantic-snippet { border-left: 3px solid #d6dfc9; padding-left: 10px; }
+.open-original { display: inline-block; margin-top: 14px; text-decoration: none; }
+.privacy-panel { margin-top: 28px; border: 1px solid #d2cab9; border-radius: 8px; padding: 16px; background: rgba(255,255,255,.45); color: #52675f; font-size: .85rem; line-height: 1.45; }
+.privacy-panel h2 { margin: 0 0 8px; color: #18352c; font-size: 1rem; }
+.privacy-panel p { margin: 8px 0; }
+.delete-all { border: 1px solid #b95242; border-radius: 5px; padding: 7px 10px; color: #a13526; background: transparent; font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; }
+.card-actions { flex-wrap: wrap; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible { outline: 3px solid #d05b35; outline-offset: 2px; }
+
 .milestone-badge {
   border-left: 3px solid #d05b35;
   padding: 4px 0 4px 16px;

@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
 .pnpm-store/
+# Local planning records remain private; public docs and assets are shareable.
 docs/
 
 # WXT generated files
@@ -32,6 +33,11 @@ yarn-error.log*
 *.crx
 *.xpi
 *.pem
+*.key
+*.p12
+*.pfx
+credentials*.json
+secrets*.json
 
 # Editor files
 .idea/

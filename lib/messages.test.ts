@@ -4,6 +4,7 @@ import {
   isCloseOffscreenDocumentRequest,
   isExtractedPageMessage,
   isRetryIndexingRequest,
+  isSearchMemoryRequest,
   isRunEmbeddingProbeOffscreenRequest,
   isRunEmbeddingProbeRequest,
   isRunIndexingQueueRequest,
@@ -52,5 +53,7 @@ describe('messages validation', () => {
     expect(isCloseOffscreenDocumentRequest({ type: 'CLOSE_OFFSCREEN_DOCUMENT', version: 2 })).toBe(false);
     expect(isRunEmbeddingProbeRequest({ type: 'RUN_EMBEDDING_PROBE', version: 1 })).toBe(true);
     expect(isRunEmbeddingProbeOffscreenRequest({ type: 'RUN_EMBEDDING_PROBE_OFFSCREEN', version: 1 })).toBe(true);
+    expect(isSearchMemoryRequest({ limit: 10, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(true);
+    expect(isSearchMemoryRequest({ limit: 0, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(false);
   });
 });

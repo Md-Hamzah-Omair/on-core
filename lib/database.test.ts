@@ -6,7 +6,10 @@ import {
   commitEmbeddingResults,
   db,
   deletePage,
+  deleteAllLocalData,
   getPageChunks,
+  getLocalDataSummary,
+  getSemanticSearchCandidates,
   LocalWebMemoryDatabase,
   recoverInterruptedIndexing,
   retryPageIndexing,
@@ -147,5 +150,38 @@ describe('database page and chunk persistence', () => {
     const chunks = await getPageChunks(saved.id);
     expect(chunks.some((chunk) => chunk.embeddingStatus === 'indexed')).toBe(true);
     expect(chunks.some((chunk) => chunk.embeddingStatus === 'pending')).toBe(true);
+  });
+
+  it('returns only valid current indexed chunks for semantic search', async () => {
+    const saved = await upsertPage(capture('semantic search content '.repeat(500)));
+    while (true) {
+      const claimed = await claimPendingEmbeddings();
+      if (claimed.length === 0) break;
+      await commitEmbeddingResults(claimed.map((item) => embeddingResult(item.pageId, item.position, item.contentRevision)));
+    }
+    const candidates = await getSemanticSearchCandidates();
+    expect(candidates).toHaveLength(saved.chunkCount);
+    expect(candidates.every((candidate) => candidate.pageId === saved.id && candidate.embedding instanceof Float32Array)).toBe(true);
+    await db.chunks.update([saved.id, 0], { embedding: new Float32Array(384) });
+    expect((await getSemanticSearchCandidates()).some((candidate) => candidate.position === 0)).toBe(false);
+  });
+
+  it('clears pages and chunks transactionally and leaves late results harmless', async () => {
+    const saved = await upsertPage(capture('delete all content '.repeat(300)));
+    const claimed = await claimPendingEmbeddings();
+    await deleteAllLocalData();
+    await commitEmbeddingResults(claimed.map((item) => embeddingResult(item.pageId, item.position, item.contentRevision)));
+    expect(await db.pages.count()).toBe(0);
+    expect(await db.chunks.count()).toBe(0);
+    expect(await retryPageIndexing(saved.id)).toBe(false);
+  });
+
+  it('derives durable page and chunk status counts', async () => {
+    await upsertPage(capture('summary content '.repeat(100)));
+    const summary = await getLocalDataSummary();
+    expect(summary.pageCount).toBe(1);
+    expect(summary.chunkCount).toBeGreaterThan(0);
+    expect(summary.pageStatuses.pending).toBe(1);
+    expect(summary.chunkStatuses.pending).toBe(summary.chunkCount);
   });
 });

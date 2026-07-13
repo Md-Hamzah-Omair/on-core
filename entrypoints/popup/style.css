@@ -40,6 +40,12 @@ p {
   margin-top: 16px;
 }
 
+.privacy-disclosure {
+  color: #52675f;
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
 button {
   width: 100%;
   border: 0;

@@ -29,6 +29,12 @@ export type RunEmbeddingProbeOffscreenRequest = {
   version: 1;
 };
 
+export type SearchMemoryRequest = { limit: number; requestId: string; query: string; type: 'SEARCH_MEMORY'; version: 1 };
+export type SearchMemoryOffscreenRequest = { limit: number; requestId: string; query: string; type: 'SEARCH_MEMORY_OFFSCREEN'; version: 1 };
+export type CancelSearchRequest = { requestId: string; type: 'CANCEL_SEARCH'; version: 1 };
+export type CancelSearchOffscreenRequest = { requestId: string; type: 'CANCEL_SEARCH_OFFSCREEN'; version: 1 };
+export type DeleteAllLocalDataRequest = { type: 'DELETE_ALL_LOCAL_DATA'; version: 1 };
+
 export type ExtractedPageMessage = {
   type: 'PAGE_EXTRACTED';
   version: 1;
@@ -100,6 +106,27 @@ export function isRunEmbeddingProbeOffscreenRequest(msg: unknown): msg is RunEmb
   if (!msg || typeof msg !== 'object') return false;
   const message = msg as Record<string, unknown>;
   return message.type === 'RUN_EMBEDDING_PROBE_OFFSCREEN' && message.version === 1;
+}
+
+function isSearchRequest(message: Record<string, unknown>, type: string): boolean {
+  return message.type === type && message.version === 1 && typeof message.requestId === 'string' && message.requestId.length > 0 && message.requestId.length <= 128 && typeof message.query === 'string' && typeof message.limit === 'number' && Number.isInteger(message.limit) && message.limit >= 1 && message.limit <= 20;
+}
+
+export function isSearchMemoryRequest(msg: unknown): msg is SearchMemoryRequest {
+  return !!msg && typeof msg === 'object' && isSearchRequest(msg as Record<string, unknown>, 'SEARCH_MEMORY');
+}
+export function isSearchMemoryOffscreenRequest(msg: unknown): msg is SearchMemoryOffscreenRequest {
+  return !!msg && typeof msg === 'object' && isSearchRequest(msg as Record<string, unknown>, 'SEARCH_MEMORY_OFFSCREEN');
+}
+export function isCancelSearchRequest(msg: unknown): msg is CancelSearchRequest {
+  return !!msg && typeof msg === 'object' && (msg as Record<string, unknown>).type === 'CANCEL_SEARCH' && (msg as Record<string, unknown>).version === 1 && typeof (msg as Record<string, unknown>).requestId === 'string';
+}
+export function isCancelSearchOffscreenRequest(msg: unknown): msg is CancelSearchOffscreenRequest {
+  return !!msg && typeof msg === 'object' && (msg as Record<string, unknown>).type === 'CANCEL_SEARCH_OFFSCREEN' && (msg as Record<string, unknown>).version === 1 && typeof (msg as Record<string, unknown>).requestId === 'string';
+}
+
+export function isDeleteAllLocalDataRequest(msg: unknown): msg is DeleteAllLocalDataRequest {
+  return !!msg && typeof msg === 'object' && (msg as Record<string, unknown>).type === 'DELETE_ALL_LOCAL_DATA' && (msg as Record<string, unknown>).version === 1;
 }
 
 export function isExtractedPageMessage(msg: unknown): msg is ExtractedPageMessage {

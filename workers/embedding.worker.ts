@@ -115,6 +115,18 @@ self.onmessage = async (event: MessageEvent<unknown>) => {
     return;
   }
 
+  if (request.type === 'EMBED_QUERY') {
+    try {
+      const output = await (await extractorPromise)([request.text], { normalize: true, pooling: 'mean' });
+      if (output.dims.length !== 2 || output.dims[0] !== 1 || output.dims[1] !== EMBEDDING_DIMENSION) throw new Error('Invalid dimension');
+      const embedding = normalizeEmbedding(new Float32Array(output.data));
+      post({ dimension: EMBEDDING_DIMENSION, embedding, modelId: EMBEDDING_MODEL_ID, modelRevision: EMBEDDING_MODEL_REVISION, requestId: request.requestId, type: 'QUERY_RESULT', version: 1 }, embedding.buffer instanceof ArrayBuffer ? [embedding.buffer] : []);
+    } catch {
+      post({ errorCode: 'INFERENCE_FAILED', message: 'Embedding generation failed for this query.', requestId: request.requestId, type: 'ERROR', version: 1 });
+    }
+    return;
+  }
+
   try {
     const results = await embedBatch(await extractorPromise, request.items);
     const buffers = results.flatMap((result) => (

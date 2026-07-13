@@ -24,10 +24,15 @@ type PendingRequest = {
   resolve: (value: EmbeddingWorkerResult[]) => void;
   reject: (error: Error) => void;
   type: 'EMBED_BATCH';
+} | {
+  reject: (error: Error) => void;
+  resolve: (value: Float32Array) => void;
+  type: 'EMBED_QUERY';
 };
 
 export class EmbeddingClient {
   private initialized = false;
+  private initializationPromise: Promise<void> | undefined;
   private readonly pending = new Map<string, PendingRequest>();
   private readonly worker: EmbeddingWorkerLike;
 
@@ -42,19 +47,42 @@ export class EmbeddingClient {
 
   async initialize(modelBaseUrl: string, wasmBaseUrl: string): Promise<void> {
     if (this.initialized) return;
+    if (!this.initializationPromise) {
+      const requestId = crypto.randomUUID();
+      this.initializationPromise = new Promise<void>((resolve, reject) => {
+        this.pending.set(requestId, { reject, resolve, type: 'INITIALIZE' });
+        this.worker.postMessage({
+          modelBaseUrl,
+          requestId,
+          type: 'INITIALIZE',
+          version: 1,
+          wasmBaseUrl,
+        });
+      }).then(() => {
+        this.initialized = true;
+      }).catch((error: unknown) => {
+        this.initializationPromise = undefined;
+        throw error;
+      });
+    }
+    await this.initializationPromise;
+  }
 
+  async embedQuery(text: string): Promise<Float32Array> {
+    if (!this.initialized) throw new Error('Embedding worker has not been initialized.');
+    if (!text.trim()) throw new Error('Query text is empty.');
     const requestId = crypto.randomUUID();
-    await new Promise<void>((resolve, reject) => {
-      this.pending.set(requestId, { reject, resolve, type: 'INITIALIZE' });
+    return new Promise<Float32Array>((resolve, reject) => {
+      this.pending.set(requestId, { reject, resolve, type: 'EMBED_QUERY' });
       this.worker.postMessage({
-        modelBaseUrl,
+        modelId: EMBEDDING_MODEL_ID,
+        modelRevision: EMBEDDING_MODEL_REVISION,
         requestId,
-        type: 'INITIALIZE',
+        text,
+        type: 'EMBED_QUERY',
         version: 1,
-        wasmBaseUrl,
       });
     });
-    this.initialized = true;
   }
 
   async embedBatch(items: EmbeddingWorkItem[]): Promise<EmbeddingWorkerResult[]> {
@@ -113,6 +141,17 @@ export class EmbeddingClient {
     if (response.type === 'ERROR') {
       this.pending.delete(response.requestId);
       request.reject(new Error(response.errorCode));
+      return;
+    }
+
+    if (response.type === 'QUERY_RESULT') {
+      if (request.type !== 'EMBED_QUERY' || !isValidEmbedding(response.embedding)) {
+        this.pending.delete(response.requestId);
+        request.reject(new Error('Embedding worker returned an invalid query response.'));
+        return;
+      }
+      this.pending.delete(response.requestId);
+      request.resolve(response.embedding);
       return;
     }
 

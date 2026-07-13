@@ -55,6 +55,7 @@ export default function App() {
       </span>
       <h1>{PROJECT_NAME}</h1>
       <p>{PROJECT_DESCRIPTION}</p>
+      <p className="privacy-disclosure">Saves this page&apos;s title, URL, and visible text to this browser profile. Nothing is uploaded.</p>
 
       <div className="actions">
         <Button
