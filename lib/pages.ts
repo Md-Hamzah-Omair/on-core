@@ -6,8 +6,9 @@ import {
 } from './text-cleaning';
 import { chunkText, type TextChunkDraft } from './text-chunking';
 import type { IndexingPhase, IndexingStatus } from './indexing';
+import { EXTRACTION_METHODS, normalizeExtractionMetadata, type ExtractionMetadata, type ExtractionMethod } from './page-extraction';
 
-export interface SavedPage {
+export interface SavedPage extends ExtractionMetadata {
   contentRevision: number;
   embeddingModelId: string;
   embeddingModelRevision: string;
@@ -31,6 +32,11 @@ export interface PageCaptureData {
   url: string;
   text: string;
   truncated: boolean;
+  extractionMethod: ExtractionMethod;
+  byline?: string;
+  siteName?: string;
+  excerpt?: string;
+  language?: string;
 }
 
 export interface PreparedPage {
@@ -60,6 +66,10 @@ export const MAX_TEXT_LENGTH = MAX_CLEAN_TEXT_LENGTH;
 export const MAX_TITLE_LENGTH = 1000;
 export const MAX_URL_LENGTH = 8192;
 
+export function isExtractionMethod(value: unknown): value is ExtractionMethod {
+  return typeof value === 'string' && (EXTRACTION_METHODS as readonly string[]).includes(value);
+}
+
 export function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, ' ').trim();
 }
@@ -87,7 +97,7 @@ export function truncateText(text: string): { text: string; truncated: boolean }
   return cleanAndTruncatePageText(text);
 }
 
-export function validatePageData(data: { title: string; url: string; text: string }): {
+export function validatePageData(data: PageCaptureData): {
   valid: boolean;
   error?: string;
 } {
@@ -103,6 +113,11 @@ export function validatePageData(data: { title: string; url: string; text: strin
   if (data.title.length > MAX_TITLE_LENGTH) return { valid: false, error: `Title exceeds character limit (${MAX_TITLE_LENGTH})` };
   if (data.url.length > MAX_URL_LENGTH) return { valid: false, error: `URL exceeds character limit (${MAX_URL_LENGTH})` };
   if (data.text.length > MAX_TEXT_LENGTH) return { valid: false, error: `Text exceeds character limit (${MAX_TEXT_LENGTH})` };
+  if (!isExtractionMethod(data.extractionMethod)) return { valid: false, error: 'Invalid extraction method' };
+  const metadata = normalizeExtractionMetadata(data);
+  if ((data.byline !== undefined && metadata.byline === undefined) || (data.siteName !== undefined && metadata.siteName === undefined) || (data.excerpt !== undefined && metadata.excerpt === undefined) || (data.language !== undefined && metadata.language === undefined)) {
+    return { valid: false, error: 'Invalid extraction metadata' };
+  }
 
   return { valid: true };
 }
@@ -123,6 +138,8 @@ export function preparePageForStorage(data: PageCaptureData): PreparedPage {
       truncated: data.truncated || cleaned.truncated,
       cleanedTextLength: cleaned.text.length,
       chunkCount: chunks.length,
+      extractionMethod: data.extractionMethod,
+      ...normalizeExtractionMetadata(data),
     },
     chunks,
   };

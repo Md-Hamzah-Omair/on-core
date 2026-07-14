@@ -4,6 +4,7 @@
 - Transformers.js, Hugging Face, Apache-2.0.
 - ONNX Runtime Web, Microsoft, MIT.
 - Dexie, Apache-2.0.
+- Mozilla Readability, Mozilla, Apache-2.0.
 - React and React DOM, Meta, MIT.
 - WXT, MIT.
 

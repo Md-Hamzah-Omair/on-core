@@ -44,7 +44,7 @@ describe('pages domain helpers', () => {
   });
 
   it('validates page data structure and boundaries', () => {
-    const valid = { title: 'My Page', url: 'https://example.com', text: 'Some content' };
+    const valid = { extractionMethod: 'body' as const, title: 'My Page', url: 'https://example.com', text: 'Some content', truncated: false };
     expect(validatePageData(valid).valid).toBe(true);
 
     expect(validatePageData({ ...valid, title: '' }).valid).toBe(false);
@@ -61,6 +61,11 @@ describe('pages domain helpers', () => {
       url: 'https://example.com/article?ref=home#comments',
       text: ' First paragraph contains enough visible content.\n\nsecond paragraph also contains enough content. ',
       truncated: true,
+      extractionMethod: 'readability',
+      byline: '  Example Author ',
+      siteName: ' Example Site ',
+      excerpt: ' Example excerpt ',
+      language: 'EN-US',
     });
 
     expect(prepared).toMatchObject({
@@ -71,6 +76,11 @@ describe('pages domain helpers', () => {
         truncated: true,
         cleanedTextLength: prepared.page.text.length,
         chunkCount: 1,
+        extractionMethod: 'readability',
+        byline: 'Example Author',
+        siteName: 'Example Site',
+        excerpt: 'Example excerpt',
+        language: 'en-us',
       },
       chunks: [{ position: 0 }],
     });
@@ -82,12 +92,14 @@ describe('pages domain helpers', () => {
       url: 'https://example.com',
       text: '   ',
       truncated: false,
+      extractionMethod: 'body',
     })).toThrow(PageContentError);
     expect(() => preparePageForStorage({
       title: 'Title',
       url: 'https://example.com',
       text: 'Too short',
       truncated: false,
+      extractionMethod: 'body',
     })).toThrow(PageContentError);
   });
 });

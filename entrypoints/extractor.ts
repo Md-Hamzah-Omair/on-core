@@ -1,25 +1,20 @@
 import { browser } from 'wxt/browser';
-import { canonicalizeUrl, normalizePageTitle } from '../lib/pages';
-import { cleanAndTruncatePageText } from '../lib/text-cleaning';
+import { extractPageContent } from '../lib/page-extraction';
+import { canonicalizeUrl } from '../lib/pages';
 import type { ExtractedPageMessage } from '../lib/messages';
 
 export default defineUnlistedScript(() => {
   try {
-    const title = normalizePageTitle(document.title) || 'Untitled Page';
     const rawUrl = window.location.href;
-    const bodyText = document.body ? document.body.innerText : '';
-
     const url = canonicalizeUrl(rawUrl);
-    const { text, truncated } = cleanAndTruncatePageText(bodyText);
+    const extracted = extractPageContent(document);
 
     const message: ExtractedPageMessage = {
       type: 'PAGE_EXTRACTED',
-      version: 1,
+      version: 2,
       payload: {
-        title,
+        ...extracted,
         url,
-        text,
-        truncated,
       },
     };
 

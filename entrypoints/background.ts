@@ -21,6 +21,7 @@ import {
   type PreparedPage,
   validatePageData,
 } from '../lib/pages';
+import type { ExtractionMethod } from '../lib/page-extraction';
 
 type PendingCapture = {
   processing: boolean;
@@ -28,7 +29,7 @@ type PendingCapture = {
   timeoutId: ReturnType<typeof setTimeout>;
 };
 
-function failure(code: Extract<CaptureResponse, { ok: false }>['code'], message: string): CaptureResponse {
+  function failure(code: Extract<CaptureResponse, { ok: false }>['code'], message: string): CaptureResponse {
   return { ok: false, code, message };
 }
 
@@ -47,6 +48,11 @@ export default defineBackground(() => {
     }
 
     await browser.runtime.sendMessage({ type: 'RUN_INDEXING_QUEUE', version: 1 });
+  }
+
+  function extractionWarning(method: ExtractionMethod): string | undefined {
+    if (method === 'readability') return undefined;
+    return `Readability could not find usable article content; saved using the ${method} fallback.`;
   }
 
   async function closeIndexerIfRequested(sender: Browser.runtime.MessageSender) {
@@ -190,6 +196,7 @@ export default defineBackground(() => {
           title: savedPage.title,
           url: savedPage.url,
           savedAt: savedPage.savedAt,
+          ...(extractionWarning(savedPage.extractionMethod) ? { warning: extractionWarning(savedPage.extractionMethod) } : {}),
         },
       });
     } catch {

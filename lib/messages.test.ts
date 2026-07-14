@@ -22,26 +22,30 @@ describe('messages validation', () => {
   it('validates PAGE_EXTRACTED messages', () => {
     const valid = {
       type: 'PAGE_EXTRACTED',
-      version: 1,
+        version: 2,
       payload: {
         title: 'Title',
         url: 'https://example.com',
         text: 'Hello content',
         truncated: false,
+        extractionMethod: 'readability',
+        byline: 'Example Author',
       },
     };
     expect(isExtractedPageMessage(valid)).toBe(true);
 
-    expect(isExtractedPageMessage({ ...valid, version: 2 })).toBe(false);
+    expect(isExtractedPageMessage({ ...valid, version: 1 })).toBe(false);
     expect(isExtractedPageMessage({ ...valid, payload: null })).toBe(false);
     expect(isExtractedPageMessage({
       ...valid,
-      payload: { title: 'Title', url: 'https://example.com', text: 'content' },
+      payload: { title: 'Title', url: 'https://example.com', text: 'content', extractionMethod: 'body' },
     })).toBe(false);
     expect(isExtractedPageMessage({
       ...valid,
-      payload: { title: 123, url: 'https://example.com', text: 'content', truncated: false },
+      payload: { title: 123, url: 'https://example.com', text: 'content', truncated: false, extractionMethod: 'body' },
     })).toBe(false);
+    expect(isExtractedPageMessage({ ...valid, payload: { ...valid.payload, extractionMethod: 'unknown' } })).toBe(false);
+    expect(isExtractedPageMessage({ ...valid, payload: { ...valid.payload, html: '<article>secret</article>' } })).toBe(false);
   });
 
   it('validates indexing queue requests', () => {

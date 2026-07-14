@@ -1,26 +1,26 @@
 # Local Web Memory
 
 Local Web Memory is a privacy-first Chrome extension that saves pages you
-explicitly choose, embeds them on-device, and searches them semantically without
+explicitly choose, embeds them on-device, and searches them with local hybrid relevance without
 a backend.
 
 ## Problem and solution
 
 Useful web pages are easy to lose and hard to rediscover with exact keywords.
-This extension captures visible body text after an explicit click, stores it in
+This extension extracts readable page text after an explicit click, stores it in
 this browser profile, and uses local embeddings to retrieve related pages using
 different wording.
 
 ## Key features
 
 - Explicit page capture, cleaning, chunking, and duplicate URL updates
-- Packaged offline local embeddings and semantic search
+- Packaged offline local embeddings with semantic, keyword, and recency ranking
 - IndexedDB storage with per-page retry, delete, and Delete All controls
 - No accounts, telemetry, analytics, cloud inference, sync, or automatic capture
 
 ## Privacy and on-device AI
 
-Title, canonical URL, visible body text, chunks, embeddings, indexing state,
+Title, canonical URL, extracted plain text and article metadata, chunks, embeddings, indexing state,
 and queries stay inside the extension's IndexedDB and local worker. The bundled
 model is `Xenova/all-MiniLM-L6-v2`, revision
 `751bff37182d3f1213fa05d7196b954e230abad9`, INT8, 384 dimensions, embedding
@@ -77,8 +77,9 @@ Demo outline: `docs/DEMO.md`.
 
 ## Limitations and future scope
 
-Capture uses visible body text rather than Mozilla Readability. Search is an
-exact bounded linear scan. Restricted browser pages cannot be captured. Mobile,
+Capture uses Mozilla Readability on a cloned document, then article, main, and
+sanitized body-text fallbacks. Search is an exact bounded local linear scan with
+semantic, lexical, and save-recency signals. Restricted browser pages cannot be captured. Mobile,
 PWA support, accounts, sync, encryption, and automatic capture are not
 implemented.
 

@@ -36,7 +36,7 @@ export default function App() {
       })) as CaptureResponse;
 
       if (response.ok) {
-        setStatus(`Saved; indexing queued: "${response.page.title}"`);
+        setStatus(`Saved; indexing queued: "${response.page.title}"${response.page.warning ? ` ${response.page.warning}` : ''}`);
       } else {
         setError(response.message || 'Page capture failed.');
       }

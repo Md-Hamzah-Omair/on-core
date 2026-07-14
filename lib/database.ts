@@ -106,6 +106,18 @@ export class LocalWebMemoryDatabase extends Dexie {
           })));
         });
       });
+    this.version(4)
+      .stores({
+        pages: '++id, &url, savedAt, indexingStatus',
+        chunks: '[pageId+position], pageId, embeddingStatus',
+      })
+      .upgrade(async (transaction) => {
+        const pages = transaction.table('pages') as PagesTable;
+        await pages.each(async (page) => {
+          if (page.id === undefined || page.extractionMethod !== undefined) return;
+          await pages.update(page.id, { extractionMethod: 'body' });
+        });
+      });
   }
 }
 

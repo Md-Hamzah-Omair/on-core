@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from 'react';
 import { browser } from 'wxt/browser';
 import { deletePage, getLocalDataSummary, getPageChunks, getSavedPages } from '../../lib/database';
 import { formatStorageEstimate, LOCAL_RUNTIME_DETAILS, type LocalDataSummary } from '../../lib/privacy-settings';
-import { indexingErrorMessage, searchErrorMessage } from '../../lib/dashboard-state';
+import { articleMetadataLabel, extractionMethodLabel, formatSavedDate, hybridRelevanceLabel, indexingErrorMessage, isCurrentSearchResponse, searchErrorMessage } from '../../lib/dashboard-state';
 import { PROJECT_NAME, SEARCH_PLACEHOLDER } from '../../lib/project';
 import type { SavedPage } from '../../lib/pages';
 import type { StoredTextChunk } from '../../lib/text-chunking';
@@ -175,7 +175,7 @@ export default function App() {
     setSearchState('searching');
     try {
       const response = await browser.runtime.sendMessage({ limit: searchLimit, query: validation.normalized, requestId, type: 'SEARCH_MEMORY', version: 1 }) as { ok: boolean; requestId: string; results?: SemanticSearchResult[]; status?: string; code?: string };
-      if (activeSearchId.current !== requestId || response.requestId !== requestId) return;
+      if (!isCurrentSearchResponse(activeSearchId.current, requestId) || response.requestId !== requestId) return;
       if (!response.ok) throw new Error(response.code ?? 'SEARCH_FAILED');
       setSearchResults(response.results ?? []);
       if (response.status === 'no-indexed-content') setSearchError(searchErrorMessage('NO_INDEXED_CONTENT'));
@@ -208,10 +208,7 @@ export default function App() {
   }
 
   function formatDate(timestamp: number): string {
-    return new Date(timestamp).toLocaleString(undefined, {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-    });
+    return formatSavedDate(timestamp);
   }
 
   function getSnippet(text: string): string {
@@ -253,8 +250,8 @@ export default function App() {
           </form>
 
           <aside className="milestone-badge">
-            <strong>Private Semantic Search</strong>
-            <p>Queries, embeddings, and comparisons stay on this device.</p>
+            <strong>Private Hybrid Search</strong>
+            <p>Meaning, keywords, and save recency are ranked on this device.</p>
           </aside>
           <section className="privacy-panel" aria-label="Privacy and local storage">
             <h2>Privacy &amp; Local Storage</h2>
@@ -276,13 +273,13 @@ export default function App() {
               <article key={result.pageId} className="page-card search-result">
                 <header className="card-header"><span className="card-domain">{getHostname(result.url)}</span><span className="card-date">{formatDate(result.savedAt)}</span></header>
                 <h3 className="card-title">{result.title}</h3>
-                <p className="semantic-label">Semantically related passage · Similarity score: {result.score.toFixed(2)}</p>
+                <p className="semantic-label">{hybridRelevanceLabel(result.score)}</p>
                 <p className="card-snippet semantic-snippet">{result.snippet}</p>
                 <a className="open-original" href={result.url} target="_blank" rel="noreferrer">Open original</a>
               </article>
             ))}</div>
           ) : searchState === 'no-results' ? (
-            <div className="empty-state"><p>No semantic matches found.</p><span>Try a different description or wait for pages to finish indexing.</span></div>
+            <div className="empty-state"><p>No relevant matches found.</p><span>Try a different description or wait for pages to finish indexing.</span></div>
           ) : isLoading ? (
             <div className="loading" role="status">Loading your saved pages...</div>
           ) : error ? (
@@ -311,8 +308,9 @@ export default function App() {
                     <h3 className="card-title">{page.title}</h3>
                     <p className="card-snippet">{getSnippet(page.text)}</p>
                     <p className="card-metadata">
-                      {(page.cleanedTextLength ?? page.text.length).toLocaleString()} cleaned characters · {page.chunkCount ?? 0} chunks
+                       {extractionMethodLabel(page.extractionMethod)} · {(page.cleanedTextLength ?? page.text.length).toLocaleString()} extracted characters · {page.chunkCount ?? 0} chunks
                     </p>
+                    {articleMetadataLabel(page) && <p className="card-article-metadata">{articleMetadataLabel(page)}</p>}
                     <p className={`indexing-status indexing-status-${page.indexingStatus}`}>
                       {indexingLabel(page)} · {page.indexedChunkCount} of {page.chunkCount} embedded
                     </p>

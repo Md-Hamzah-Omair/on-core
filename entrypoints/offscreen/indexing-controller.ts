@@ -66,7 +66,7 @@ export class IndexingController {
       return this.client.embedQuery(validation.normalized);
     });
     if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
-    const results = rankSemanticSearch(embedding, candidates, limit);
+    const results = rankSemanticSearch(embedding, validation.normalized, candidates, limit, Date.now());
     return { results, status: results.length ? 'results' : 'no-results' };
   }
 

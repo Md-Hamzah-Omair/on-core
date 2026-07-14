@@ -5,9 +5,18 @@ export const MAX_SEARCH_QUERY_LENGTH = 500;
 export const DEFAULT_SEARCH_RESULT_LIMIT = 10;
 export const MAX_SEARCH_RESULT_LIMIT = 20;
 export const MIN_SEMANTIC_SCORE = 0.25;
+export const MIN_LEXICAL_SCORE = 0.10;
 export const MAX_SEARCH_CANDIDATE_CHUNKS = 20_000;
 export const MAX_SEARCH_CHUNKS_PER_PAGE = 512;
 export const SEARCH_SNIPPET_LENGTH = 280;
+export const RECENCY_HALF_LIFE_MS = 90 * 24 * 60 * 60 * 1000;
+export const DEFAULT_HYBRID_WEIGHTS = { lexical: 0.25, recency: 0.10, semantic: 0.65 } as const;
+
+export interface HybridWeights {
+  lexical: number;
+  recency: number;
+  semantic: number;
+}
 
 export interface SemanticSearchCandidate {
   embedding: Float32Array;
@@ -33,20 +42,42 @@ export type SearchQueryValidation =
   | { normalized: string; valid: true }
   | { message: string; valid: false };
 
+type PageSearchData = {
+  hostnameTokens: string[];
+  recencyScore: number;
+  savedAt: number;
+  titleTokens: string[];
+  urlTokens: string[];
+};
+
+function clamp(value: number, minimum = 0, maximum = 1): number {
+  return Math.max(minimum, Math.min(maximum, value));
+}
+
+export function normalizeLexicalTokens(value: string): string[] {
+  return [...new Set(value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/)
+    .filter((token) => Array.from(token).length >= 2))];
+}
+
 export function validateSearchQuery(value: unknown): SearchQueryValidation {
   if (typeof value !== 'string') return { message: 'Enter a search query.', valid: false };
-  const normalized = value.replace(/\s+/g, ' ').trim();
+  const normalized = value.normalize('NFKC').replace(/\s+/g, ' ').trim();
   const length = Array.from(normalized).length;
   if (length < MIN_SEARCH_QUERY_LENGTH) return { message: 'Enter at least 3 characters to search.', valid: false };
   if (length > MAX_SEARCH_QUERY_LENGTH) return { message: 'Search queries must be 500 characters or fewer.', valid: false };
+  if (normalizeLexicalTokens(normalized).length === 0) return { message: 'Enter at least one meaningful search term.', valid: false };
   return { normalized, valid: true };
 }
 
 export function validateSearchResultLimit(value: unknown): value is number {
-  return typeof value === 'number'
-    && Number.isInteger(value)
-    && value >= 1
-    && value <= MAX_SEARCH_RESULT_LIMIT;
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= MAX_SEARCH_RESULT_LIMIT;
+}
+
+export function validateHybridWeights(weights: HybridWeights): void {
+  const values = [weights.semantic, weights.lexical, weights.recency];
+  if (values.some((value) => !Number.isFinite(value) || value < 0) || Math.abs(values.reduce((sum, value) => sum + value, 0) - 1) > 1e-9) {
+    throw new RangeError('Hybrid search weights must be finite, non-negative, and sum to 1.');
+  }
 }
 
 export function dotProduct(left: Float32Array, right: Float32Array): number {
@@ -76,6 +107,42 @@ export function normalizedDotProduct(left: Float32Array, right: Float32Array): n
   return Math.max(-1, Math.min(1, dotProduct(left, right)));
 }
 
+function fieldScore(queryTokens: string[], fieldTokens: string[], referenceLength: number): number {
+  if (fieldTokens.length === 0) return 0;
+  const counts = new Map<string, number>();
+  for (const token of fieldTokens) counts.set(token, (counts.get(token) ?? 0) + 1);
+  const matched = queryTokens.filter((token) => (counts.get(token) ?? 0) > 0);
+  const coverage = matched.length / queryTokens.length;
+  const frequency = queryTokens.reduce((sum, token) => sum + Math.min(counts.get(token) ?? 0, 3) / 3, 0) / queryTokens.length;
+  const lengthPenalty = Math.min(1, referenceLength / Math.max(referenceLength, fieldTokens.length));
+  return coverage * (0.8 + 0.2 * frequency) * lengthPenalty;
+}
+
+function hasTokenPhrase(tokens: string[], phrase: string[]): boolean {
+  if (phrase.length < 2 || phrase.length > tokens.length) return false;
+  return tokens.some((_, start) => phrase.every((token, index) => tokens[start + index] === token));
+}
+
+function urlTokens(url: string): { hostnameTokens: string[]; urlTokens: string[] } {
+  try {
+    const parsed = new URL(url);
+    let pathAndQuery = `${parsed.pathname} ${parsed.search}`;
+    try { pathAndQuery = decodeURIComponent(pathAndQuery); } catch { /* Keep encoded URL text. */ }
+    return { hostnameTokens: normalizeLexicalTokens(parsed.hostname), urlTokens: normalizeLexicalTokens(pathAndQuery) };
+  } catch {
+    return { hostnameTokens: [], urlTokens: [] };
+  }
+}
+
+export function recencyScore(savedAt: number, now: number): number {
+  if (!Number.isFinite(savedAt) || savedAt <= 0 || !Number.isFinite(now) || now <= 0 || savedAt > now) return 0;
+  return clamp(2 ** (-(now - savedAt) / RECENCY_HALF_LIFE_MS));
+}
+
+function normalizedSavedAt(savedAt: number, now: number): number {
+  return Number.isFinite(savedAt) && savedAt > 0 && savedAt <= now ? savedAt : 0;
+}
+
 export function createSearchSnippet(text: string, maximumLength = SEARCH_SNIPPET_LENGTH): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   const characters = Array.from(normalized);
@@ -84,51 +151,88 @@ export function createSearchSnippet(text: string, maximumLength = SEARCH_SNIPPET
   const minimumBoundary = Math.floor(budget * 0.6);
   let cut = budget;
   for (let index = budget - 1; index >= minimumBoundary; index -= 1) {
-    if (/[.!?]/.test(characters[index])) {
-      cut = index + 1;
-      break;
-    }
+    if (/[.!?]/.test(characters[index])) { cut = index + 1; break; }
   }
   if (cut === budget) {
     for (let index = budget - 1; index >= minimumBoundary; index -= 1) {
-      if (/\s/.test(characters[index])) {
-        cut = index;
-        break;
-      }
+      if (/\s/.test(characters[index])) { cut = index; break; }
     }
   }
   return `${characters.slice(0, cut).join('').trimEnd()}...`;
 }
 
+function compareResults(left: SemanticSearchResult & { lexicalScore: number; semanticScore: number }, right: SemanticSearchResult & { lexicalScore: number; semanticScore: number }): number {
+  return right.score - left.score
+    || right.semanticScore - left.semanticScore
+    || right.lexicalScore - left.lexicalScore
+    || right.savedAt - left.savedAt
+    || left.pageId - right.pageId
+    || left.position - right.position;
+}
+
 export function rankSemanticSearch(
   queryEmbedding: Float32Array,
+  query: string,
   candidates: SemanticSearchCandidate[],
   limit = DEFAULT_SEARCH_RESULT_LIMIT,
+  now = Date.now(),
+  weights: HybridWeights = DEFAULT_HYBRID_WEIGHTS,
 ): SemanticSearchResult[] {
   if (!isValidEmbedding(queryEmbedding)) throw new TypeError('The query embedding is invalid.');
   if (!validateSearchResultLimit(limit)) throw new RangeError('The result limit is invalid.');
-  const winners = new Map<number, SemanticSearchResult>();
+  validateHybridWeights(weights);
+  const queryTokens = normalizeLexicalTokens(query);
+  if (queryTokens.length === 0) throw new TypeError('The search query has no meaningful terms.');
+  const winners = new Map<number, SemanticSearchResult & { lexicalScore: number; semanticScore: number }>();
   const pageChunkCounts = new Map<number, number>();
+  const pageData = new Map<number, PageSearchData>();
+
   for (const candidate of candidates) {
+    if (!isValidEmbedding(candidate.embedding)) continue;
     const count = pageChunkCounts.get(candidate.pageId) ?? 0;
     if (count >= MAX_SEARCH_CHUNKS_PER_PAGE) continue;
     pageChunkCounts.set(candidate.pageId, count + 1);
-    if (!isValidEmbedding(candidate.embedding)) continue;
-    const score = normalizedDotProduct(queryEmbedding, candidate.embedding);
-    if (score < MIN_SEMANTIC_SCORE) continue;
-    const result: SemanticSearchResult = {
+    let page = pageData.get(candidate.pageId);
+    if (!page) {
+      const url = urlTokens(candidate.url);
+      page = {
+        ...url,
+        recencyScore: recencyScore(candidate.savedAt, now),
+        savedAt: normalizedSavedAt(candidate.savedAt, now),
+        titleTokens: normalizeLexicalTokens(candidate.title),
+      };
+      pageData.set(candidate.pageId, page);
+    }
+    const semanticScore = clamp(normalizedDotProduct(queryEmbedding, candidate.embedding));
+    const lexicalScore = clamp(
+      0.45 * fieldScore(queryTokens, page.titleTokens, 16)
+      + 0.35 * fieldScore(queryTokens, normalizeLexicalTokens(candidate.text), 256)
+      + 0.15 * fieldScore(queryTokens, page.hostnameTokens, 8)
+      + 0.05 * fieldScore(queryTokens, page.urlTokens, 32)
+      + (hasTokenPhrase(page.titleTokens, queryTokens) ? 0.15 : 0),
+    );
+    if (semanticScore < MIN_SEMANTIC_SCORE && lexicalScore < MIN_LEXICAL_SCORE) continue;
+    const result = {
+      lexicalScore,
       pageId: candidate.pageId,
       position: candidate.position,
-      savedAt: candidate.savedAt,
-      score,
+      savedAt: page.savedAt,
+      score: clamp(weights.semantic * semanticScore + weights.lexical * lexicalScore + weights.recency * page.recencyScore),
+      semanticScore,
       snippet: createSearchSnippet(candidate.text),
       title: candidate.title,
       url: candidate.url,
     };
     const previous = winners.get(candidate.pageId);
-    if (!previous || score > previous.score || (score === previous.score && candidate.position < previous.position)) winners.set(candidate.pageId, result);
+    if (!previous || compareResults(result, previous) < 0) winners.set(candidate.pageId, result);
   }
-  return [...winners.values()]
-    .sort((left, right) => right.score - left.score || right.savedAt - left.savedAt || left.pageId - right.pageId || left.position - right.position)
-    .slice(0, limit);
+  return [...winners.values()].sort(compareResults).slice(0, limit).map((result) => ({
+    pageId: result.pageId,
+    position: result.position,
+    savedAt: result.savedAt,
+    score: result.score,
+    snippet: result.snippet,
+    title: result.title,
+    url: result.url,
+  }));
 }

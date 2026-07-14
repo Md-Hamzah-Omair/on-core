@@ -240,6 +240,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible
   font-size: 0.8rem;
 }
 
+.card-article-metadata {
+  margin: 5px 0 0;
+  color: #718179;
+  font-size: 0.8rem;
+}
+
 .indexing-status {
   margin: 6px 0 0;
   color: #718179;

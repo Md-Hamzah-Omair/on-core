@@ -17,7 +17,7 @@ import {
 } from './database';
 import { EMBEDDING_DIMENSION } from './embeddings';
 import type { EmbeddingWorkerResult } from './embedding-messages';
-import { preparePageForStorage } from './pages';
+import { preparePageForStorage, type SavedPage } from './pages';
 
 interface LegacyPage {
   id?: number;
@@ -32,10 +32,13 @@ function capture(text: string, url = 'https://example.com/article') {
   return preparePageForStorage({
     title: 'Example article',
     url,
-    text,
-    truncated: false,
+      text,
+      truncated: false,
+      extractionMethod: 'body',
   });
 }
+
+type V3Page = Omit<SavedPage, 'extractionMethod' | 'byline' | 'siteName' | 'excerpt' | 'language'>;
 
 function embeddingResult(pageId: number, position: number, contentRevision: number): EmbeddingWorkerResult {
   const embedding = new Float32Array(EMBEDDING_DIMENSION);
@@ -61,10 +64,13 @@ describe('database page and chunk persistence', () => {
     expect(await getPageChunks(saved.id)).toHaveLength(saved.chunkCount);
     expect(saved.indexingStatus).toBe('pending');
     expect(saved.contentRevision).toBe(1);
+    expect(saved.extractionMethod).toBe('body');
   });
 
   it('preserves the page ID and replaces all chunks when a URL is saved again', async () => {
     const first = await upsertPage(capture('first capture '.repeat(500)));
+    const claimed = await claimPendingEmbeddings();
+    await commitEmbeddingResults(claimed.map((item) => embeddingResult(item.pageId, item.position, item.contentRevision)));
     const replacement = await upsertPage(capture('Replacement content has enough visible text to be stored.'));
 
     expect(replacement.id).toBe(first.id);
@@ -74,6 +80,7 @@ describe('database page and chunk persistence', () => {
     expect(chunks[0].text).toContain('Replacement content');
     expect(replacement.contentRevision).toBe(2);
     expect(chunks[0].embeddingStatus).toBe('pending');
+    expect(chunks.every((chunk) => chunk.embedding === undefined)).toBe(true);
   });
 
   it('deletes a page and all of its chunks in one operation', async () => {
@@ -110,8 +117,42 @@ describe('database page and chunk persistence', () => {
     expect(chunks.length).toBeGreaterThan(0);
     expect(page?.indexingStatus).toBe('pending');
     expect(page?.contentRevision).toBe(1);
+    expect(page?.extractionMethod).toBe('body');
     expect(chunks.every((chunk) => chunk.embeddingStatus === 'pending' && chunk.contentRevision === 1)).toBe(true);
 
+    upgraded.close();
+    await Dexie.delete(name);
+  });
+
+  it('upgrades v3 records with truthful body extraction provenance without resetting indexing', async () => {
+    const name = `migration-v3-${crypto.randomUUID()}`;
+    const legacy = new Dexie(name);
+    legacy.version(3).stores({
+      pages: '++id, &url, savedAt, indexingStatus',
+      chunks: '[pageId+position], pageId, embeddingStatus',
+    });
+    const pages = legacy.table<V3Page, number>('pages');
+    const id = await pages.add({
+      chunkCount: 1,
+      cleanedTextLength: 400,
+      contentRevision: 1,
+      embeddingModelId: 'Xenova/all-MiniLM-L6-v2',
+      embeddingModelRevision: '751bff37182d3f1213fa05d7196b954e230abad9',
+      embeddingVersion: 1,
+      indexedChunkCount: 1,
+      indexingPhase: null,
+      indexingStatus: 'indexed',
+      savedAt: 1,
+      text: 'Legacy content '.repeat(30),
+      title: 'Legacy v3 page',
+      truncated: false,
+      url: 'https://example.com/v3',
+    });
+    legacy.close();
+
+    const upgraded = new LocalWebMemoryDatabase(name);
+    await upgraded.open();
+    expect(await upgraded.pages.get(id)).toMatchObject({ extractionMethod: 'body', indexingStatus: 'indexed', contentRevision: 1 });
     upgraded.close();
     await Dexie.delete(name);
   });

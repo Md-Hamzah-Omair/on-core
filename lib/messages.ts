@@ -35,14 +35,21 @@ export type CancelSearchRequest = { requestId: string; type: 'CANCEL_SEARCH'; ve
 export type CancelSearchOffscreenRequest = { requestId: string; type: 'CANCEL_SEARCH_OFFSCREEN'; version: 1 };
 export type DeleteAllLocalDataRequest = { type: 'DELETE_ALL_LOCAL_DATA'; version: 1 };
 
+import type { ExtractionMethod } from './page-extraction';
+
 export type ExtractedPageMessage = {
   type: 'PAGE_EXTRACTED';
-  version: 1;
+  version: 2;
   payload: {
     title: string;
     url: string;
     text: string;
     truncated: boolean;
+    extractionMethod: ExtractionMethod;
+    byline?: string;
+    siteName?: string;
+    excerpt?: string;
+    language?: string;
   };
 };
 
@@ -54,6 +61,7 @@ export type CaptureResponse =
         title: string;
         url: string;
         savedAt: number;
+        warning?: string;
       };
     }
   | {
@@ -132,14 +140,18 @@ export function isDeleteAllLocalDataRequest(msg: unknown): msg is DeleteAllLocal
 export function isExtractedPageMessage(msg: unknown): msg is ExtractedPageMessage {
   if (!msg || typeof msg !== 'object') return false;
   const m = msg as Record<string, unknown>;
-  if (m.type !== 'PAGE_EXTRACTED' || m.version !== 1) return false;
+  if (m.type !== 'PAGE_EXTRACTED' || m.version !== 2) return false;
   const payload = m.payload;
   if (!payload || typeof payload !== 'object') return false;
   const p = payload as Record<string, unknown>;
+  const keys = Object.keys(p);
+  if (!keys.every((key) => ['title', 'url', 'text', 'truncated', 'extractionMethod', 'byline', 'siteName', 'excerpt', 'language'].includes(key))) return false;
   return (
     typeof p.title === 'string' &&
     typeof p.url === 'string' &&
     typeof p.text === 'string' &&
-    typeof p.truncated === 'boolean'
+    typeof p.truncated === 'boolean' &&
+    ['readability', 'article', 'main', 'body'].includes(p.extractionMethod as string) &&
+    ['byline', 'siteName', 'excerpt', 'language'].every((key) => p[key] === undefined || typeof p[key] === 'string')
   );
 }
