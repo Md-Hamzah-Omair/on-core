@@ -14,19 +14,19 @@ search, deletion, theme, privacy, and encrypted portable-backup flows are
 implemented and covered by the repository test suite. Manual Chromium checks and final submission media remain
 listed in the checklist below.
 
-**Demo video:** Not yet added. Replace this line with the final public demo URL
-before submission.
+**Demo video:** [On-Core](https://drive.google.com/file/d/1nSsdHxwuI5Xdh4qlqRLn8NnT8R35NAY0/view?usp=sharing)
 
 ## Screenshots
 
-No screenshots are committed yet, so this README does not link to fabricated or
-missing images. Before submission, capture and add:
-
 - Dashboard overview
-- Search results for a paraphrased query
-- Local indexing progress
+- <img width="1920" height="1200" alt="Screenshot From 2026-07-15 20-08-37" src="https://github.com/user-attachments/assets/7a59ea58-a1b6-4056-b124-6fe8f0e08957" />
 
-Place final images under `assets/screenshots/`, then add their real paths here.
+- Popup box for page memory
+- <img width="1920" height="1200" alt="Screenshot From 2026-07-15 20-08-26" src="https://github.com/user-attachments/assets/a65e4620-4c60-494c-adbf-125963b2e907" />
+
+- Local indexing progress
+- <img width="1920" height="1200" alt="Screenshot From 2026-07-15 20-08-47" src="https://github.com/user-attachments/assets/fb5aa5b7-3634-4697-9125-78d4066e4c8b" />
+
 
 ## Problem
 
@@ -295,16 +295,5 @@ at `public/models/Xenova/all-MiniLM-L6-v2/LICENSE`.
 
 On-Core source is available under the [MIT License](LICENSE). Third-party
 components remain under their respective licenses.
-
-## Final Submission Checklist
-
-- [x] Public product branding is On-Core.
-- [x] Local search and encrypted portable-backup boundaries are documented.
-- [x] Lint, typecheck, tests, and production build pass.
-- [x] Generated manifest and packaged local assets are audited.
-- [ ] Add the final demo video URL to this README.
-- [ ] Capture and add a dashboard screenshot.
-- [ ] Capture and add a search-results screenshot.
-- [ ] Capture and add an indexing-progress screenshot.
 - [ ] Complete manual Chromium checks listed in the completion report.
 - [ ] Submit the final repository and media through Unstop.
