@@ -49,6 +49,11 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 2.25r
 .error { color: var(--destructive); background: color-mix(in srgb, var(--destructive) 11%, var(--surface)); }
 .ui-toast-region { position: static; width: auto; margin-top: 0.75rem; }
 .ui-toast { padding: 0.5rem; font-size: 0.75rem; }
+.popup-lock-shell { min-height: 25rem; }
+.popup-lock-card { margin-top: 0.85rem; border-radius: 2rem 2rem 2rem 0.75rem; padding: 1.75rem 1.35rem; background: var(--secondary-container); }
+.popup-lock-card h1 { color: var(--on-secondary-container); }
+.popup-lock-card > p:not(.eyebrow) { color: var(--text-secondary); font-size: 0.8rem; line-height: 1.5; }
+.popup-lock-disclosure { border-top: 1px solid var(--color-border); padding-top: 0.8rem; }
 
 @media (prefers-reduced-motion: no-preference) {
   body, .popup-shell, .popup-header, .popup-theme select { transition: color var(--motion-fast), background-color var(--motion-medium), border-color var(--motion-fast); }

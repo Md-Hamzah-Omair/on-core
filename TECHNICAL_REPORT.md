@@ -65,6 +65,40 @@ Dexie schema version 4 stores pages and chunks in IndexedDB. Chunk embedding
 commits are checked against page and content revisions. Startup recovery resets
 interrupted or stale indexing work, and failed pages expose a retry action.
 
+## Encrypted Backup Format
+
+Portable backups use the `.oncore` extension and JSON format identifier
+`on-core-encrypted-backup`, version 1. The encrypted payload contains schema-v4
+pages and chunks, including embeddings represented as base64url-encoded
+little-endian Float32 bytes. Serialization sorts pages by ID and chunks by page
+ID/position and emits fixed-order records.
+
+Web Crypto derives a non-extractable 256-bit AES-GCM key from the password with
+PBKDF2-HMAC-SHA-256, exactly 600,000 iterations, and a random 32-byte salt. The
+backup uses a fresh random 96-bit IV and a 128-bit GCM tag. Format version,
+creation time, schema version, KDF/cipher parameters, salt, IV, and ciphertext
+length are authenticated as additional data. Passwords and keys are not
+serialized or persisted.
+
+Import is capped at 128 MiB, with a 96 MiB decrypted-payload cap, 10,000-page
+cap, and 100,000-chunk cap. It validates exact object keys, bounded strings,
+finite safe integers, embedding dimensions/normalization, IDs, URL uniqueness,
+page/chunk relationships, revisions, and counts. Restore is full replacement in
+one Dexie transaction after decryption, validation, summary review, and explicit
+confirmation. The active IndexedDB database remains plaintext.
+Restore also rebinds operational content revisions and changes snapshot-captured
+`indexing` work to `pending`, so stale pre-restore inference cannot commit into
+the replacement records.
+
+## Local Privacy Lock
+
+The dashboard and popup are gated by a shared extension-storage lock before
+sensitive UI mounts. A 32-byte verifier is derived with Web Crypto
+PBKDF2-HMAC-SHA-256, 600,000 iterations, and a random 32-byte salt. Configuration
+uses `browser.storage.local`; unlocked state is only a last-activity timestamp in
+`browser.storage.session`. Restart, explicit lock, and configurable inactivity
+return the interface to locked. This does not alter or encrypt Dexie schema v4.
+
 ## Hybrid Ranking
 
 For each eligible chunk:
@@ -101,6 +135,10 @@ embedding validation and protocols, IndexedDB persistence and recovery,
 indexing control, hybrid ranking and grouping, dashboard state, privacy
 summaries, preferences, message validation, and UI structure. ESLint and strict
 TypeScript checks run independently before the WXT production build.
+Backup tests cover KDF parameters, AES-GCM round trips, wrong passwords,
+ciphertext and authenticated-metadata tampering, IV uniqueness, deterministic
+serialization, strict validation, size limits, database replacement, and
+transaction rollback.
 
 Browser evaluation still requires loading `.output/chrome-mv3`, saving real
 pages, observing indexing, searching with paraphrases, deleting data, changing
@@ -108,9 +146,10 @@ themes/result limits, restarting the browser, and repeating search offline.
 
 ## Verification
 
-- Automated tests: 19 test files, 83 tests passed.
-- Production Chrome package size: 37.93 MB reported by WXT; filesystem byte
-  count for `.output/chrome-mv3` was 37,932,822 bytes.
+- Automated tests: 26 test files, 109 tests passed.
+- Production Chrome package size: 38.01 MB reported by WXT; filesystem byte
+  count for `.output/chrome-mv3` was 38,009,374 bytes, an increase of 76,552
+  bytes from the pre-backup baseline.
 - Tested development environment: Linux x86-64, Node.js `24.15.0`, pnpm
   `11.1.3`.
 - Browser version and hardware specifications: Not measured reliably.
@@ -131,5 +170,9 @@ themes/result limits, restarting the browser, and repeating search offline.
 - Corrupt or orphaned IndexedDB records have limited automated repair.
 - Linear scan is appropriate for the bounded MVP but not a very large corpus.
 - Saved content and embeddings are plaintext within the browser profile.
-- No latency, memory, accuracy, security-audit, mobile, cloud, or encryption
-  performance claim is made.
+- The local privacy lock prevents casual UI access only and is bypassable by a
+  determined attacker with browser-profile or device access.
+- Encrypted export provides no password recovery, live database encryption,
+  direct provider integration, automatic backup, merge, or synchronization.
+- No latency, memory, accuracy, professional-security-audit, mobile, cloud, or
+  encryption-performance claim is made.

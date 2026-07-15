@@ -5,6 +5,7 @@ export const MAX_SEARCH_QUERY_LENGTH = 500;
 export const DEFAULT_SEARCH_RESULT_LIMIT = 3;
 export const MAX_SEARCH_RESULT_LIMIT = 20;
 export const MIN_SEMANTIC_SCORE = 0.25;
+export const MIN_SINGLE_TERM_SEMANTIC_SCORE = 0.20;
 export const MIN_LEXICAL_SCORE = 0.10;
 export const MAX_SEARCH_CANDIDATE_CHUNKS = 20_000;
 export const MAX_SEARCH_CHUNKS_PER_PAGE = 512;
@@ -50,13 +51,52 @@ type PageSearchData = {
   urlTokens: string[];
 };
 
+type QueryTerm = {
+  variants: string[];
+};
+
 function clamp(value: number, minimum = 0, maximum = 1): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
 export function normalizeLexicalTokens(value: string): string[] {
-  return [...new Set(value.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim().split(/\s+/)
+  return [...new Set(value.normalize('NFKC')
+    .replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, '$1 $2')
+    .replace(/([\p{Lu}]+)([\p{Lu}][\p{Ll}])/gu, '$1 $2')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
+    .split(/\s+/)
     .filter((token) => Array.from(token).length >= 2))];
+}
+
+function addVariant(variants: Set<string>, token: string): void {
+  if (Array.from(token).length >= 2) variants.add(token);
+}
+
+function addInflectionBase(variants: Set<string>, base: string): void {
+  if (Array.from(base).length >= 4) addVariant(variants, base);
+  if (base.length >= 3 && base.at(-1) === base.at(-2)) {
+    addVariant(variants, base.slice(0, -1));
+  } else if (!base.endsWith('e')) {
+    addVariant(variants, `${base}e`);
+  }
+}
+
+function queryTermVariants(token: string): string[] {
+  const variants = new Set([token]);
+  const length = Array.from(token).length;
+  if (token.endsWith('ing') && length >= 6) addInflectionBase(variants, token.slice(0, -3));
+  if (token.endsWith('ied') && length >= 5) addVariant(variants, `${token.slice(0, -3)}y`);
+  if (token.endsWith('ed') && length >= 5) addInflectionBase(variants, token.slice(0, -2));
+  if (token.endsWith('ies') && length >= 5) addVariant(variants, `${token.slice(0, -3)}y`);
+  if (token.endsWith('es') && length >= 5) addInflectionBase(variants, token.slice(0, -2));
+  if (token.endsWith('s') && !token.endsWith('ss') && length >= 4) addVariant(variants, token.slice(0, -1));
+  return [...variants];
+}
+
+function queryTerms(tokens: string[]): QueryTerm[] {
+  return tokens.map((token) => ({ variants: queryTermVariants(token) }));
 }
 
 export function validateSearchQuery(value: unknown): SearchQueryValidation {
@@ -107,13 +147,29 @@ export function normalizedDotProduct(left: Float32Array, right: Float32Array): n
   return Math.max(-1, Math.min(1, dotProduct(left, right)));
 }
 
-function fieldScore(queryTokens: string[], fieldTokens: string[], referenceLength: number): number {
+function titlePartialMatch(term: QueryTerm, fieldTokens: string[]): boolean {
+  return term.variants.some((variant) => Array.from(variant).length >= 4
+    && fieldTokens.some((token) => token !== variant && token.endsWith(variant)));
+}
+
+function fieldScore(query: QueryTerm[], fieldTokens: string[], referenceLength: number, allowTitlePartial = false): number {
   if (fieldTokens.length === 0) return 0;
   const counts = new Map<string, number>();
   for (const token of fieldTokens) counts.set(token, (counts.get(token) ?? 0) + 1);
-  const matched = queryTokens.filter((token) => (counts.get(token) ?? 0) > 0);
-  const coverage = matched.length / queryTokens.length;
-  const frequency = queryTokens.reduce((sum, token) => sum + Math.min(counts.get(token) ?? 0, 3) / 3, 0) / queryTokens.length;
+  let coverageTotal = 0;
+  let frequencyTotal = 0;
+  for (const term of query) {
+    const count = Math.max(...term.variants.map((variant) => counts.get(variant) ?? 0));
+    if (count > 0) {
+      coverageTotal += 1;
+      frequencyTotal += Math.min(count, 3) / 3;
+    } else if (allowTitlePartial && titlePartialMatch(term, fieldTokens)) {
+      coverageTotal += 0.65;
+      frequencyTotal += 0.2;
+    }
+  }
+  const coverage = coverageTotal / query.length;
+  const frequency = frequencyTotal / query.length;
   const lengthPenalty = Math.min(1, referenceLength / Math.max(referenceLength, fieldTokens.length));
   return coverage * (0.8 + 0.2 * frequency) * lengthPenalty;
 }
@@ -183,6 +239,8 @@ export function rankSemanticSearch(
   validateHybridWeights(weights);
   const queryTokens = normalizeLexicalTokens(query);
   if (queryTokens.length === 0) throw new TypeError('The search query has no meaningful terms.');
+  const terms = queryTerms(queryTokens);
+  const minimumSemanticScore = terms.length === 1 ? MIN_SINGLE_TERM_SEMANTIC_SCORE : MIN_SEMANTIC_SCORE;
   const winners = new Map<number, SemanticSearchResult & { lexicalScore: number; semanticScore: number }>();
   const pageChunkCounts = new Map<number, number>();
   const pageData = new Map<number, PageSearchData>();
@@ -205,13 +263,13 @@ export function rankSemanticSearch(
     }
     const semanticScore = clamp(normalizedDotProduct(queryEmbedding, candidate.embedding));
     const lexicalScore = clamp(
-      0.45 * fieldScore(queryTokens, page.titleTokens, 16)
-      + 0.35 * fieldScore(queryTokens, normalizeLexicalTokens(candidate.text), 256)
-      + 0.15 * fieldScore(queryTokens, page.hostnameTokens, 8)
-      + 0.05 * fieldScore(queryTokens, page.urlTokens, 32)
+      0.45 * fieldScore(terms, page.titleTokens, 16, true)
+      + 0.35 * fieldScore(terms, normalizeLexicalTokens(candidate.text), 256)
+      + 0.15 * fieldScore(terms, page.hostnameTokens, 8)
+      + 0.05 * fieldScore(terms, page.urlTokens, 32)
       + (hasTokenPhrase(page.titleTokens, queryTokens) ? 0.15 : 0),
     );
-    if (semanticScore < MIN_SEMANTIC_SCORE && lexicalScore < MIN_LEXICAL_SCORE) continue;
+    if (semanticScore < minimumSemanticScore && lexicalScore < MIN_LEXICAL_SCORE) continue;
     const result = {
       lexicalScore,
       pageId: candidate.pageId,

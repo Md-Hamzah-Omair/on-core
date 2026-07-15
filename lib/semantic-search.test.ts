@@ -24,6 +24,7 @@ describe('hybrid semantic search', () => {
     const valid = validateSearchQuery('  React—Memoization, react  ');
     expect(valid.valid && valid.normalized).toBe('React—Memoization, react');
     expect(normalizeLexicalTokens('  React—Memoization, react  ')).toEqual(['react', 'memoization']);
+    expect(normalizeLexicalTokens('iPhone OpenAIParser')).toEqual(['phone', 'open', 'ai', 'parser']);
     expect(validateSearchQuery('!!! a !').valid).toBe(false);
     expect(validateSearchQuery('the and of').valid).toBe(true);
   });
@@ -46,6 +47,34 @@ describe('hybrid semantic search', () => {
     expect(rankSemanticSearch(rankingVector(0.3, 0.95), 'react server components', candidates, 10, HYBRID_NOW)[0].pageId).toBe(1);
     expect(rankSemanticSearch(rankingVector(0.3, 0.95), 'developer mozilla', candidates, 10, HYBRID_NOW)[0].pageId).toBe(2);
     expect(rankSemanticSearch(rankingVector(0.3, 0.95), 'strict mode', candidates, 10, HYBRID_NOW)[0].pageId).toBe(3);
+  });
+
+  it('recalls compound and suffix title matches without body substring matching', () => {
+    const candidates: SemanticSearchCandidate[] = [
+      { embedding: rankingVector(0, 1), pageId: 1, position: 0, savedAt: HYBRID_NOW, text: 'No matching words.', title: 'Smartphone camera guide', url: 'https://example.test/smart' },
+      { embedding: rankingVector(0, 1), pageId: 2, position: 0, savedAt: HYBRID_NOW, text: 'No matching words.', title: 'iPhone setup guide', url: 'https://example.test/ios' },
+      { embedding: rankingVector(0, 1), pageId: 3, position: 0, savedAt: HYBRID_NOW, text: 'This body mentions smartphone only.', title: 'Unrelated', url: 'https://example.test/body' },
+    ];
+    const results = rankSemanticSearch(rankingVector(1), 'phone', candidates, 10, HYBRID_NOW);
+    expect(results.map((result) => result.pageId)).toEqual([2, 1]);
+  });
+
+  it('matches common inflected query terms to their base lexical evidence', () => {
+    const results = rankSemanticSearch(rankingVector(1), 'coding', [{
+      embedding: rankingVector(0, 1), pageId: 1, position: 0, savedAt: HYBRID_NOW,
+      text: 'A practical code review checklist.', title: 'Code review guide', url: 'https://example.test/code',
+    }], 10, HYBRID_NOW);
+    expect(results).toHaveLength(1);
+  });
+
+  it('uses a lower semantic-only threshold for single meaningful terms', () => {
+    const weakSemantic = rankingVector(0.22, Math.sqrt(1 - 0.22 ** 2));
+    const candidate = {
+      embedding: weakSemantic, pageId: 1, position: 0, savedAt: HYBRID_NOW,
+      text: 'Different words entirely.', title: 'Conceptual result', url: 'https://example.test/concept',
+    };
+    expect(rankSemanticSearch(rankingVector(1), 'phone', [candidate], 10, HYBRID_NOW)).toHaveLength(1);
+    expect(rankSemanticSearch(rankingVector(1), 'phone case', [candidate], 10, HYBRID_NOW)).toEqual([]);
   });
 
   it('applies bounded frequency, length normalization, and duplicate query terms', () => {

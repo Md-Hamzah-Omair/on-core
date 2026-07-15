@@ -31,3 +31,9 @@ the attributed model files and ONNX Runtime Web WASM runtime.
 
 Transitive packages used by the pnpm dependency graph retain their respective
 licenses as declared in their package metadata.
+
+## Platform Cryptography
+
+Encrypted `.oncore` export and restore use the browser's standards-based Web
+Crypto API for PBKDF2-HMAC-SHA-256 and AES-256-GCM. No third-party cryptography
+or cloud-provider SDK was added for this feature.

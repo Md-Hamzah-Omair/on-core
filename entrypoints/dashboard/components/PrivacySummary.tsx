@@ -3,15 +3,23 @@ import { Button } from '../../../components/Button';
 import { Card } from '../../../components/Card';
 import { ConfirmDialog } from '../../../components/ConfirmDialog';
 import { formatStorageEstimate, LOCAL_RUNTIME_DETAILS, type LocalDataSummary } from '../../../lib/privacy-settings';
+import { BackupAndRestore } from './BackupAndRestore';
+import { ProviderRecommendations } from './ProviderRecommendations';
+import { PrivacyLockSettings } from './PrivacyLockSettings';
+import type { AutoLockMinutes } from '../../../lib/privacy-lock';
 
 interface PrivacySummaryProps {
   deleting: boolean;
+  autoLockMinutes: AutoLockMinutes;
+  onAutoLockChange: (minutes: AutoLockMinutes) => Promise<void>;
   onDeleteAll: () => Promise<boolean>;
+  onLock: () => Promise<void>;
+  onRestored: (indexingPageId?: number) => void;
   storageUsage?: number;
   summary: LocalDataSummary | null;
 }
 
-export function PrivacySummary({ deleting, onDeleteAll, storageUsage, summary }: PrivacySummaryProps) {
+export function PrivacySummary({ autoLockMinutes, deleting, onAutoLockChange, onDeleteAll, onLock, onRestored, storageUsage, summary }: PrivacySummaryProps) {
   const [confirming, setConfirming] = useState(false);
   return (
     <aside className="privacy-column" id="privacy-settings" aria-labelledby="privacy-heading">
@@ -35,7 +43,7 @@ export function PrivacySummary({ deleting, onDeleteAll, storageUsage, summary }:
             <div><dt>Revision</dt><dd>{LOCAL_RUNTIME_DETAILS.modelRevision}</dd></div>
             <div><dt>Embeddings</dt><dd>{LOCAL_RUNTIME_DETAILS.dimension} dimensions · version {LOCAL_RUNTIME_DETAILS.embeddingVersion}</dd></div>
             <div><dt>Runtime</dt><dd>{LOCAL_RUNTIME_DETAILS.runtime}</dd></div>
-            <div><dt>Permissions</dt><dd>activeTab, scripting, offscreen</dd></div>
+            <div><dt>Permissions</dt><dd>activeTab, scripting, offscreen, storage</dd></div>
             <div><dt>Host permissions</dt><dd>None</dd></div>
             <div><dt>Storage</dt><dd>{formatStorageEstimate(storageUsage)}</dd></div>
           </dl>
@@ -44,6 +52,9 @@ export function PrivacySummary({ deleting, onDeleteAll, storageUsage, summary }:
           <p>Saved content remains in this browser profile until deleted, browser data is cleared, or the extension is uninstalled.</p>
         </details>
       </Card>
+      <PrivacyLockSettings autoLockMinutes={autoLockMinutes} onAutoLockChange={onAutoLockChange} onLock={onLock} />
+      <BackupAndRestore disabled={deleting} onRestored={onRestored} />
+      <ProviderRecommendations />
       <Card className="danger-zone">
         <p className="section-kicker">Destructive action</p><h3>Delete saved data</h3><p>Theme and result-count preferences are kept. Saved pages, chunks, and embeddings are removed permanently.</p>
         <Button variant="danger" disabled={!summary?.pageCount} loading={deleting} loadingLabel="Deleting..." onClick={() => setConfirming(true)}>Delete all saved memories</Button>

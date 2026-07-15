@@ -13,7 +13,7 @@ export default defineConfig({
     name: 'On-Core',
     short_name: 'On-Core',
     description: 'Private, on-device search for the web you choose to remember.',
-    permissions: ['activeTab', 'scripting', 'offscreen'],
+    permissions: ['activeTab', 'scripting', 'offscreen', 'storage'],
     host_permissions: [],
     content_security_policy: {
       extension_pages: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'",

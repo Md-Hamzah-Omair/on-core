@@ -10,8 +10,8 @@ ranking. It has no backend, account, telemetry, or cloud inference.
 ## Project Status
 
 Submission candidate, version `0.1.0`. The local capture, extraction, indexing,
-search, deletion, theme, and privacy flows are implemented and covered by the
-repository test suite. Manual Chromium checks and final submission media remain
+search, deletion, theme, privacy, and encrypted portable-backup flows are
+implemented and covered by the repository test suite. Manual Chromium checks and final submission media remain
 listed in the checklist below.
 
 **Demo video:** Not yet added. Replace this line with the final public demo URL
@@ -54,6 +54,11 @@ groups matching chunks into one result per page.
 - Hybrid semantic, lexical, and recency ranking with one result per page
 - Result-count choices of 3, 5, and 10, with 3 as the default
 - Per-page deletion and isolated **Delete all** controls
+- Password-protected `.oncore` export and transactional full-replace restore
+- Local privacy lock with first-run setup, restart locking, lock-now,
+  inactivity timeout, and confirmed local-data reset
+- Manual encrypted-backup guidance for privacy-focused and broadly compatible
+  file-storage providers
 - Persistent light, dark, and system themes
 - Responsive Material 3 Expressive-inspired pastel interface
 - No automatic browsing-history capture, accounts, backend, or analytics
@@ -175,6 +180,26 @@ pnpm dev
 3. Open the dashboard and wait for local indexing to finish.
 4. Search with an idea, exact phrase, hostname, or related wording.
 5. Open a result, retry a failed index, or delete saved data as needed.
+6. In **Privacy & settings**, download an encrypted backup or validate and
+   restore a previously exported `.oncore` file.
+
+### Encrypted Backup
+
+Export reads the current pages, chunks, embeddings, and indexing metadata,
+validates them, serializes a versioned payload, and encrypts it locally before
+download. The password is never stored. Losing it permanently prevents restore;
+there is no password-recovery mechanism.
+
+Restore checks the 128 MiB file limit, validates the public envelope,
+authenticates and decrypts the payload, validates every record, shows a summary,
+and requires destructive confirmation. It then replaces pages and chunks in a
+single IndexedDB transaction. It does not merge records, and a failed restore
+leaves the current database unchanged.
+
+The `.oncore` file can be uploaded manually to Proton Drive, Tresorit, Peergos,
+Google Drive, OneDrive, or another file-storage provider. On-Core has no direct
+provider integration and makes no provider network request. Providers can still
+observe file name, size, upload time, and account metadata.
 
 Example: after saving a page that explains offline semantic retrieval, search
 for `find pages about private local retrieval`. Once indexing is complete, the
@@ -193,9 +218,23 @@ page local storage.
 | `activeTab` | Access only the tab involved in an explicit save action |
 | `scripting` | Inject the one-time page extractor after that action |
 | `offscreen` | Host local model inference outside the service worker |
+| `storage` | Keep the salted privacy-lock verifier and browser-session lock state |
 
 `host_permissions` is empty. See [PRIVACY.md](PRIVACY.md) for deletion,
 limitations, and the threat model.
+
+Portable backups use browser Web Crypto with PBKDF2-HMAC-SHA-256 at 600,000
+iterations, a random 32-byte salt, and AES-256-GCM with a fresh random 12-byte
+IV and authenticated envelope metadata. This feature has not undergone a
+professional security audit.
+
+The local privacy lock uses the same PBKDF2 hash and iteration count
+with a separate random 32-byte salt. Only the salted verifier and timeout
+setting persist in `storage.local`; unlocked state exists only in
+`storage.session`, so browser restart locks the interface. The lock hides the
+dashboard, saved content, search results, backup controls, counts, and popup
+capture details. It is intended to prevent casual interface access, not direct
+browser-profile or IndexedDB inspection.
 
 ## Performance And Evaluation
 
@@ -219,18 +258,19 @@ offline search after the model has initialized.
   intended for an MVP-sized personal collection, not a very large corpus.
 - Local model initialization and indexing can be CPU-intensive on slower
   devices.
-- Saved content and embeddings are not encrypted at rest by On-Core; browser
-  profile and device security remain important.
-- No mobile application, PWA, automatic capture, import/export, or account
-  system is implemented.
+- Saved content and embeddings in the active IndexedDB database are not
+  encrypted at rest; only exported `.oncore` files are encrypted.
+- The local privacy lock is not encryption and does not stop a determined
+  attacker with browser-profile, extension-storage, or device access.
+- No mobile application, PWA, automatic capture, account system, cloud API,
+  synchronization, merge restore, or password recovery is implemented.
 
 ## Future Scope
 
 Potential future work includes larger-corpus indexing, more robust database
-repair, accessibility testing across additional browsers, and user-controlled
-cloud backup with encrypted synchronization. Cloud backup and encrypted sync
-are future work only; they are not implemented or represented in the current
-architecture.
+repair, accessibility testing across additional browsers, live database
+encryption, and separately designed synchronization. The current feature is a
+manual encrypted file export and full-replace restore, not cloud sync.
 
 ## Demo Outline (2-3 Minutes)
 
@@ -259,7 +299,7 @@ components remain under their respective licenses.
 ## Final Submission Checklist
 
 - [x] Public product branding is On-Core.
-- [x] Local feature set is documented without cloud or encryption claims.
+- [x] Local search and encrypted portable-backup boundaries are documented.
 - [x] Lint, typecheck, tests, and production build pass.
 - [x] Generated manifest and packaged local assets are audited.
 - [ ] Add the final demo video URL to this README.

@@ -9,11 +9,14 @@ import type { LocalDataSummary } from '../../lib/privacy-settings';
 import { validateSearchQuery, type SemanticSearchResult } from '../../lib/semantic-search';
 import type { StoredTextChunk } from '../../lib/text-chunking';
 import { readSearchResultLimit, writeSearchResultLimit, type SearchResultLimit } from '../../lib/ui-preferences';
+import { usePrivacyLock } from '../../lib/use-privacy-lock';
+import type { AutoLockMinutes } from '../../lib/privacy-lock';
 import { DashboardNavigation } from './components/DashboardNavigation';
 import { PrivacySummary } from './components/PrivacySummary';
 import { SavedMemories } from './components/SavedMemories';
 import { SearchPanel } from './components/SearchPanel';
 import { SearchResults } from './components/SearchResults';
+import { PrivacyLockScreen } from './components/PrivacyLockScreen';
 
 type SearchState = 'idle' | 'searching' | 'results' | 'no-results' | 'failed';
 type SearchResponse = {
@@ -25,7 +28,13 @@ type SearchResponse = {
   status?: 'no-indexed-content' | 'results' | 'no-results';
 };
 
-export default function App() {
+interface DashboardContentProps {
+  autoLockMinutes: AutoLockMinutes;
+  onAutoLockChange: (minutes: AutoLockMinutes) => Promise<void>;
+  onLock: () => Promise<void>;
+}
+
+export function DashboardContent({ autoLockMinutes, onAutoLockChange, onLock }: DashboardContentProps) {
   const [pages, setPages] = useState<SavedPage[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
@@ -178,6 +187,24 @@ export default function App() {
     } finally { setIsDeletingAll(false); }
   }
 
+  function handleBackupRestored(indexingPageId?: number) {
+    if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
+    activeSearchId.current = null;
+    activeSearchParameters.current = null;
+    lastSubmittedQuery.current = '';
+    previousIndexingStatuses.current = null;
+    setChunkPreviews({});
+    setExpandedPageId(null);
+    setSearchResults([]);
+    setSearchState('idle');
+    setQuery('');
+    setRefreshKey((value) => value + 1);
+    addToast('Encrypted backup restored.', 'success');
+    if (indexingPageId !== undefined) {
+      void browser.runtime.sendMessage({ pageId: indexingPageId, type: 'RETRY_PAGE_INDEXING', version: 1 });
+    }
+  }
+
   async function retryIndexing(pageId: number) {
     setRetryingPageId(pageId);
     setPageErrors((current) => ({ ...current, [pageId]: '' }));
@@ -247,14 +274,14 @@ export default function App() {
     <>
       <a className="skip-link" href="#search">Skip to search</a>
       <div className="dashboard-app">
-        <DashboardNavigation />
+        <DashboardNavigation onLock={onLock} />
         <main className="dashboard-shell">
           <SearchPanel error={searchError} isSearching={searching} limit={searchLimit} onClear={clearSearch} onLimitChange={changeSearchLimit} onQueryChange={setQuery} onSubmit={submitSearch} progressLabel={searchProgress} query={query} showClear={searchState !== 'idle'} />
           <SearchResults isLoading={searching} results={searchResults} showNoResults={searchState === 'no-results'} summary={searchSummary} />
           {error && <p className="page-load-error" role="alert">{error}</p>}
           <div className="management-grid">
             <SavedMemories chunkPreviews={chunkPreviews} deletingPageId={deletingPageId} expandedPageId={expandedPageId} filter={filter} loadingChunkPageId={loadingChunkPageId} onDelete={removePage} onFilterChange={setFilter} onRetry={retryIndexing} onToggleChunks={toggleChunks} pageErrors={pageErrors} pages={pages} retryingPageId={retryingPageId} />
-            <PrivacySummary deleting={isDeletingAll} onDeleteAll={removeAllPages} storageUsage={storageUsage} summary={summary} />
+            <PrivacySummary autoLockMinutes={autoLockMinutes} deleting={isDeletingAll} onAutoLockChange={onAutoLockChange} onDeleteAll={removeAllPages} onLock={onLock} onRestored={handleBackupRestored} storageUsage={storageUsage} summary={summary} />
           </div>
           {isLoading && <p className="initial-loading" role="status">Loading saved memories...</p>}
         </main>
@@ -262,4 +289,26 @@ export default function App() {
       <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
     </>
   );
+}
+
+export default function App() {
+  const privacyLock = usePrivacyLock();
+
+  if (privacyLock.loading || privacyLock.status !== 'unlocked') {
+    return (
+      <PrivacyLockScreen
+        mode={privacyLock.loading ? 'loading' : privacyLock.status === 'unconfigured' ? 'unconfigured' : 'locked'}
+        onResetData={async () => {
+          const response = await browser.runtime.sendMessage({ type: 'DELETE_ALL_LOCAL_DATA', version: 1 }) as { ok?: boolean };
+          if (!response.ok) throw new Error('Local data reset was rejected.');
+          localStorage.clear();
+          await privacyLock.reset();
+        }}
+        onSetup={privacyLock.setup}
+        onUnlock={privacyLock.unlock}
+      />
+    );
+  }
+
+  return <DashboardContent autoLockMinutes={privacyLock.autoLockMinutes} onAutoLockChange={privacyLock.setTimeoutMinutes} onLock={privacyLock.lock} />;
 }

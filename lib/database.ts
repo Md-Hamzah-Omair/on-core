@@ -123,6 +123,60 @@ export class LocalWebMemoryDatabase extends Dexie {
 
 export const db = new LocalWebMemoryDatabase();
 
+export interface DatabaseBackupData {
+  chunks: StoredTextChunk[];
+  pages: SavedPage[];
+}
+
+export async function getDatabaseBackupData(database = db): Promise<DatabaseBackupData> {
+  return database.transaction('r', database.pages, database.chunks, async () => ({
+    chunks: await database.chunks.orderBy('[pageId+position]').toArray(),
+    pages: await database.pages.orderBy('id').toArray(),
+  }));
+}
+
+export async function replaceDatabaseFromBackup(data: DatabaseBackupData, database = db): Promise<void> {
+  await database.transaction('rw', database.pages, database.chunks, async () => {
+    const [currentPages, activeChunkCount] = await Promise.all([
+      database.pages.toArray(),
+      database.chunks.where('embeddingStatus').equals('indexing').count(),
+    ]);
+    if (activeChunkCount > 0) throw new Error('Wait for active indexing to finish before restoring a backup.');
+    const revision = Math.max(
+      Date.now(),
+      ...currentPages.map((page) => page.contentRevision),
+      ...data.pages.map((page) => page.contentRevision),
+    ) + 1;
+    if (!Number.isSafeInteger(revision)) throw new RangeError('Backup revisions cannot be restored safely.');
+    const chunks = data.chunks.map((chunk) => ({
+      ...chunk,
+      contentRevision: revision,
+      ...(chunk.embeddingStatus === 'indexing'
+        ? { embeddingStatus: 'pending' as const, indexingStartedAt: undefined }
+        : {}),
+    }));
+    const chunksByPage = new Map<number, StoredTextChunk[]>();
+    for (const chunk of chunks) {
+      const pageChunks = chunksByPage.get(chunk.pageId) ?? [];
+      pageChunks.push(chunk);
+      chunksByPage.set(chunk.pageId, pageChunks);
+    }
+    const pages = data.pages.map((page) => {
+      const state = derivePageIndexingState(chunksByPage.get(page.id!) ?? [], revision);
+      return {
+        ...page,
+        ...state,
+        contentRevision: revision,
+        indexingError: state.indexingStatus === 'failed' ? page.indexingError : undefined,
+      };
+    });
+    await database.chunks.clear();
+    await database.pages.clear();
+    await database.pages.bulkPut(pages);
+    await database.chunks.bulkPut(chunks);
+  });
+}
+
 export async function upsertPage(prepared: PreparedPage): Promise<SavedPage & { id: number }> {
   return db.transaction('rw', db.pages, db.chunks, async () => {
     const existingPage = await db.pages.where('url').equals(prepared.page.url).first();

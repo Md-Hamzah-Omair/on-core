@@ -14,7 +14,8 @@ flowchart TB
   O -->|worker messages| W[Embedding worker<br/>Transformers.js and ONNX WASM]
   B --> D[(IndexedDB<br/>pages and chunks)]
   O --> D
-  A[Dashboard<br/>search and data management] --> D
+  A[Dashboard<br/>search, data management, backup] --> D
+  A -->|encrypted .oncore file| F[User-selected file location]
   A -->|runtime messages| B
 ```
 
@@ -28,7 +29,7 @@ flowchart TB
 - **Embedding worker:** loads packaged model/WASM assets and performs CPU/WASM
   inference away from the UI thread.
 - **Dashboard:** reads local state, starts searches, shows progress and grouped
-  results, and provides deletion/privacy controls.
+  results, and provides deletion, privacy, encrypted export, and restore controls.
 - **IndexedDB:** Dexie-managed durable storage for pages, chunks, embeddings,
   revisions, and indexing states.
 
@@ -101,17 +102,59 @@ flowchart LR
     DB[(IndexedDB)]
     HR[Hybrid ranking]
     UI --> EX --> AI --> DB --> HR --> UI
+    DB --> BK[Local Web Crypto backup]
+    BK --> FILE[Encrypted .oncore file]
   end
   subgraph Network[Network / cloud]
     SITE[Original website opened by user]
+    CLOUD[File-storage provider reached manually]
   end
   UI -. explicit Open page navigation .-> SITE
+  FILE -. user manually uploads .-> CLOUD
 ```
 
 There is no application backend, remote model fetch, cloud inference,
-telemetry, backup provider, or synchronization path. Normal capture, indexing,
-and search remain inside the extension. Opening an original result is a normal,
-explicit browser navigation to that site.
+telemetry, provider API, or synchronization path. Normal capture, indexing, and
+search remain inside the extension. Opening an original result is a normal,
+explicit browser navigation. Uploading an exported backup is a separate manual
+user action outside the extension.
+
+## Encrypted Portable Backup
+
+The dashboard reads a transactionally consistent snapshot of the existing
+schema-v4 `pages` and `chunks` stores. It converts typed embeddings to
+little-endian Float32 bytes, validates all records, serializes a deterministic
+versioned payload, and encrypts it with Web Crypto. PBKDF2-HMAC-SHA-256 uses
+600,000 iterations and a random 32-byte salt to derive an AES-256-GCM key. Each
+backup uses a fresh random 12-byte IV and authenticates the fixed-order public
+envelope header as additional data.
+
+Import rejects oversized, unsupported, malformed, unauthenticated, or invalid
+payloads before any write. After the user reviews the authenticated summary and
+confirms replacement, pages and chunks are cleared and bulk-written inside one
+Dexie transaction. Operational content revisions are rebound and interrupted
+`indexing` records return to `pending`, preventing pre-restore worker results
+from committing into restored content. Transaction abort restores the previous
+records. Restore is full replacement only; no merging or conflict resolution exists.
+
+Passwords and keys are transient and are not persisted. Backup code does not
+change the database schema, service-worker protocol, inference worker, CSP, or
+permissions. The active IndexedDB stores remain plaintext.
+
+## Local Privacy Lock
+
+Before the dashboard content component mounts, an outer gate reads a versioned
+salted verifier from `browser.storage.local` and an unlocked-session timestamp
+from `browser.storage.session`. Popup rendering uses the same gate. Locked UI
+does not mount database reads or render saved titles, snippets, counts, search
+results, capture controls, or backup controls.
+
+Setup and unlock derive a 32-byte verifier with PBKDF2-HMAC-SHA-256, 600,000
+iterations, and a random 32-byte salt. Only the verifier, parameters, and
+selected 5/15/30/60-minute timeout persist. The plaintext password and derived
+bytes are not retained. Session storage is cleared by browser restart; explicit
+lock and inactivity remove it earlier. This is interface access control only,
+not IndexedDB encryption or a defense against browser-profile access.
 
 ## Why Linear Scan Is Acceptable
 
@@ -123,7 +166,7 @@ approximate-nearest-neighbor index is potential future work after measured need.
 
 ## Security Boundary
 
-The manifest requests `activeTab`, `scripting`, and `offscreen`, with no host
+The manifest requests `activeTab`, `scripting`, `offscreen`, and `storage`, with no host
 permissions. CSP allows extension-owned scripts, workers, connections, and
 WASM execution while blocking objects and external bases. This limits remote
 executable resources but does not encrypt IndexedDB or protect a compromised

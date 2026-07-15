@@ -24,6 +24,7 @@ import {
 import type { ExtractionMethod } from '../lib/page-extraction';
 
 type PendingCapture = {
+  generation: number;
   processing: boolean;
   resolve: (response: CaptureResponse) => void;
   timeoutId: ReturnType<typeof setTimeout>;
@@ -34,6 +35,8 @@ type PendingCapture = {
 }
 
 export default defineBackground(() => {
+  let dataResetGeneration = 0;
+  let activeDataResets = 0;
   const pendingCaptures = new Map<number, PendingCapture>();
 
   async function ensureOffscreenIndexer() {
@@ -98,7 +101,7 @@ export default defineBackground(() => {
     pending.resolve(response);
   }
 
-  function requestExtraction(tabId: number): Promise<CaptureResponse> {
+  function requestExtraction(tabId: number, generation: number): Promise<CaptureResponse> {
     settleCapture(tabId, failure('SAVE_FAILED', 'A newer capture request replaced the previous one.'));
 
     return new Promise((resolve) => {
@@ -106,7 +109,7 @@ export default defineBackground(() => {
         settleCapture(tabId, failure('INJECTION_FAILED', 'Page capture timed out. Reload the page and try again.'));
       }, 5000);
 
-      pendingCaptures.set(tabId, { processing: false, resolve, timeoutId });
+      pendingCaptures.set(tabId, { generation, processing: false, resolve, timeoutId });
 
       const injection: Browser.scripting.ScriptInjection<[], void> = {
         target: { tabId },
@@ -124,7 +127,12 @@ export default defineBackground(() => {
   }
 
   async function captureActivePage(): Promise<CaptureResponse> {
+    if (activeDataResets > 0) return failure('SAVE_FAILED', 'Page capture is unavailable while local data is being reset.');
+    const generation = dataResetGeneration;
     const [activeTab] = await browser.tabs.query({ active: true, currentWindow: true });
+    if (activeDataResets > 0 || generation !== dataResetGeneration) {
+      return failure('SAVE_FAILED', 'Page capture was cancelled because local data was reset.');
+    }
     if (activeTab?.id === undefined || !activeTab.url) {
       return failure('NO_ACTIVE_TAB', 'No active tab is available to save.');
     }
@@ -133,7 +141,7 @@ export default defineBackground(() => {
       return failure('UNSUPPORTED_URL', 'Only HTTP and HTTPS pages can be saved.');
     }
 
-    return requestExtraction(activeTab.id);
+    return requestExtraction(activeTab.id, generation);
   }
 
   async function storeExtractedPage(message: ExtractedPageMessage, sender: Browser.runtime.MessageSender) {
@@ -183,6 +191,10 @@ export default defineBackground(() => {
     }
 
     try {
+      if (pending.generation !== dataResetGeneration) {
+        settleCapture(tabId, failure('SAVE_FAILED', 'Page capture was cancelled because local data was reset.'));
+        return;
+      }
       const savedPage = await upsertPage(prepared);
       if (savedPage.id === undefined) {
         throw new Error('Saved page did not receive an identifier.');
@@ -223,9 +235,15 @@ export default defineBackground(() => {
     }
 
     if (isDeleteAllLocalDataRequest(message)) {
+      activeDataResets += 1;
+      dataResetGeneration += 1;
+      for (const tabId of pendingCaptures.keys()) {
+        settleCapture(tabId, failure('SAVE_FAILED', 'Page capture was cancelled because local data was reset.'));
+      }
       void deleteAllLocalData()
         .then(() => sendResponse({ ok: true }))
-        .catch(() => sendResponse({ ok: false }));
+        .catch(() => sendResponse({ ok: false }))
+        .finally(() => { activeDataResets -= 1; });
       return true;
     }
 

@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SavedPage } from '../../../lib/pages';
+import { BackupAndRestore } from './BackupAndRestore';
 import { DashboardNavigation } from './DashboardNavigation';
 import { PrivacySummary } from './PrivacySummary';
 import { SavedMemories } from './SavedMemories';
@@ -78,11 +79,24 @@ describe('dashboard UI structure', () => {
   });
 
   it('keeps technical privacy details collapsed by default', () => {
-    const root = render(<PrivacySummary deleting={false} onDeleteAll={async () => true} summary={{ chunkCount: 5, chunkStatuses: { failed: 0, indexed: 4, indexing: 1, pending: 0 }, pageCount: 2, pageStatuses: { failed: 0, indexed: 1, indexing: 1, pending: 0 } }} />);
+    const root = render(<PrivacySummary autoLockMinutes={15} deleting={false} onAutoLockChange={async () => {}} onDeleteAll={async () => true} onLock={async () => {}} onRestored={() => {}} summary={{ chunkCount: 5, chunkStatuses: { failed: 0, indexed: 4, indexing: 1, pending: 0 }, pageCount: 2, pageStatuses: { failed: 0, indexed: 1, indexing: 1, pending: 0 } }} />);
     const details = root.querySelector<HTMLDetailsElement>('.technical-details');
 
     expect(details?.open).toBe(false);
     expect(details?.querySelector('summary')?.textContent).toBe('Technical details');
     expect(root.querySelector('#privacy-settings')).not.toBeNull();
+  });
+
+  it('provides labelled password, file, reveal, and restore controls', () => {
+    const root = render(<BackupAndRestore onRestored={() => {}} />);
+    const passwordInputs = Array.from(root.querySelectorAll<HTMLInputElement>('input[type="password"]'));
+    const fileInput = root.querySelector<HTMLInputElement>('#backup-file');
+
+    expect(passwordInputs).toHaveLength(3);
+    expect(passwordInputs.every((input) => input.labels?.length === 1)).toBe(true);
+    expect(fileInput?.labels?.[0]?.textContent).toContain('Choose .oncore file');
+    expect(root.querySelectorAll('button[aria-label^="Show"]')).toHaveLength(3);
+    expect(root.textContent).toContain('This does not encrypt the active IndexedDB database.');
+    expect(root.textContent).toContain('has not undergone a professional security audit');
   });
 });

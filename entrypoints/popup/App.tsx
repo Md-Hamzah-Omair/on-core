@@ -4,6 +4,7 @@ import { Button } from '../../components/Button';
 import { Progress } from '../../components/Progress';
 import type { CaptureResponse } from '../../lib/messages';
 import { PROJECT_DESCRIPTION, PROJECT_NAME } from '../../lib/project';
+import { usePrivacyLock } from '../../lib/use-privacy-lock';
 
 type PopupTheme = 'light' | 'dark' | 'system';
 
@@ -27,6 +28,7 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
   const [theme, setTheme] = useState<PopupTheme>(readPopupTheme);
+  const privacyLock = usePrivacyLock();
 
   useEffect(() => {
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -69,6 +71,24 @@ export default function App() {
       const message = caught instanceof Error ? caught.message : 'Unknown connection error';
       setError(`Could not contact the extension background process: ${message}`);
     } finally { setIsSaving(false); }
+  }
+
+  if (privacyLock.loading || privacyLock.status !== 'unlocked') {
+    return (
+      <main className="popup-shell popup-lock-shell">
+        <header className="popup-header"><div className="popup-identity"><span className="popup-mark" aria-hidden="true">OC</span><strong>{PROJECT_NAME}</strong></div></header>
+        <section className="popup-lock-card" aria-labelledby="popup-lock-title">
+          <p className="eyebrow">Local privacy lock</p>
+          <h1 id="popup-lock-title">{privacyLock.loading ? 'Checking lock...' : privacyLock.status === 'unconfigured' ? 'Set up On-Core' : 'On-Core is locked'}</h1>
+          <p>Open the dashboard to {privacyLock.status === 'unconfigured' ? 'create a PIN or password' : 'unlock saved memories'}.</p>
+          <p className="popup-lock-disclosure">Local privacy lock prevents casual access through the On-Core interface. Saved data in the active browser database is not encrypted at rest.</p>
+        </section>
+        <div className="actions">
+          <Button size="large" loading={isOpening} loadingLabel="Opening..." onClick={() => void openDashboard()}>Open dashboard</Button>
+        </div>
+        {error && <p className="error" role="alert">{error}</p>}
+      </main>
+    );
   }
 
   return (

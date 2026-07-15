@@ -1,7 +1,8 @@
 import { ThemeControl } from '../../../components/ThemeControl';
+import { Button } from '../../../components/Button';
 import { PROJECT_NAME } from '../../../lib/project';
 
-export function DashboardNavigation() {
+export function DashboardNavigation({ onLock }: { onLock?: () => Promise<void> }) {
   return (
     <header className="dashboard-nav-wrap">
       <nav className="floating-nav" aria-label="Dashboard sections">
@@ -16,6 +17,7 @@ export function DashboardNavigation() {
         </div>
         <div className="nav-tools">
           <span className="local-status"><span aria-hidden="true" />Local only</span>
+          {onLock && <Button className="nav-lock-button" size="small" variant="quiet" onClick={() => void onLock()}>Lock</Button>}
           <ThemeControl className="nav-theme" label="Theme" />
         </div>
       </nav>
