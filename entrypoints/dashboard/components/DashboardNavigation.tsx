@@ -6,8 +6,8 @@ export function DashboardNavigation() {
     <header className="dashboard-nav-wrap">
       <nav className="floating-nav" aria-label="Dashboard sections">
         <a className="nav-brand" href="#search" aria-label={`${PROJECT_NAME}, go to search`}>
-          <span className="mark" aria-hidden="true">LWM</span>
-          <span className="nav-brand-copy"><strong>{PROJECT_NAME}</strong><span>Private web memory</span></span>
+          <span className="mark" aria-hidden="true">OC</span>
+          <span className="nav-brand-copy"><strong>{PROJECT_NAME}</strong><span>Private, on-device search</span></span>
         </a>
         <div className="nav-links">
           <a href="#search">Search</a>

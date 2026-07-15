@@ -50,6 +50,12 @@ secrets*.json
 Thumbs.db
 
 # Temporary files
+*.patch
 *.tmp
 *.temp
 *.swp
+
+# Local exports and unfinished backup artifacts
+*.backup
+*.bak
+*.vault

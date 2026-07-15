@@ -133,7 +133,9 @@ body {
 .ui-button--small { min-height: 2.375rem; padding: 0.5rem 0.875rem; font-size: 0.8125rem; }
 .ui-button--large { min-height: 3.25rem; padding: 0.875rem 1.375rem; }
 .ui-button:disabled { cursor: not-allowed; opacity: 0.5; transform: none; box-shadow: none; }
-.ui-button:active:not(:disabled) { transform: scale(0.98); }
+.ui-button:hover:not(:disabled) { filter: brightness(1.06); box-shadow: 0 3px 9px rgb(53 43 64 / 16%); }
+.ui-button--quiet:hover:not(:disabled), .ui-button--outlined:hover:not(:disabled) { background: var(--surface-container); }
+.ui-button:active:not(:disabled) { filter: brightness(0.94); transform: scale(0.98); box-shadow: none; }
 
 .ui-progress {
   width: 100%;
@@ -196,6 +198,8 @@ body {
   background: var(--surface-container);
   cursor: pointer;
 }
+.ui-theme-control select:hover { border-color: var(--primary); background-color: var(--surface-container-high); }
+.ui-theme-control select:disabled { cursor: not-allowed; opacity: 0.5; }
 
 @keyframes progress-shimmer {
   from { background-position-x: -100%; }
@@ -206,8 +210,7 @@ body {
   body, .ui-button, .ui-theme-control select, .ui-progress::-webkit-progress-value {
     transition: color var(--motion-fast), background-color var(--motion-medium), border-color var(--motion-fast), box-shadow var(--motion-medium), transform var(--motion-fast);
   }
-  .ui-button:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 3px 9px rgb(53 43 64 / 16%); }
-  .ui-button--quiet:hover:not(:disabled), .ui-button--outlined:hover:not(:disabled) { background: var(--surface-container); }
+  .ui-button:hover:not(:disabled) { transform: translateY(-1px); }
 }
 
 @media (prefers-reduced-motion: reduce) {

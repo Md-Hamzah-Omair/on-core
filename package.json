@@ -1,6 +1,7 @@
 {
-  "name": "local-web-memory",
+  "name": "on-core",
   "version": "0.1.0",
+  "description": "Private, on-device search for the web you choose to remember.",
   "private": true,
   "packageManager": "pnpm@11.1.3",
   "type": "module",

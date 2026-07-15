@@ -10,8 +10,9 @@ export default defineConfig({
     },
   }),
   manifest: {
-    name: 'Local Web Memory',
-    description: 'A private, local-first memory for the web.',
+    name: 'On-Core',
+    short_name: 'On-Core',
+    description: 'Private, on-device search for the web you choose to remember.',
     permissions: ['activeTab', 'scripting', 'offscreen'],
     host_permissions: [],
     content_security_policy: {

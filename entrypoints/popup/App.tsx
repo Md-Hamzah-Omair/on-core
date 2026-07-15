@@ -73,7 +73,7 @@ export default function App() {
 
   return (
     <main className="popup-shell">
-      <header className="popup-header"><div className="popup-identity"><span className="popup-mark" aria-hidden="true">LWM</span><strong>Web Memory</strong></div><label className="popup-theme" htmlFor="popup-theme"><span>Theme</span><select id="popup-theme" aria-label="Popup theme" value={theme} onChange={(event) => changeTheme(event.target.value as PopupTheme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></header>
+      <header className="popup-header"><div className="popup-identity"><span className="popup-mark" aria-hidden="true">OC</span><strong>{PROJECT_NAME}</strong></div><label className="popup-theme" htmlFor="popup-theme"><span>Theme</span><select id="popup-theme" aria-label="Popup theme" value={theme} onChange={(event) => changeTheme(event.target.value as PopupTheme)}><option value="system">System</option><option value="light">Light</option><option value="dark">Dark</option></select></label></header>
       <section className="popup-hero" aria-labelledby="popup-title">
         <p className="eyebrow">{isSaving ? 'Saving locally' : 'Private by design'}</p>
         <h1 id="popup-title">{PROJECT_NAME}</h1>
@@ -82,7 +82,7 @@ export default function App() {
         {isSaving && <div className="capture-progress" role="status" aria-live="polite"><Progress label="Extracting and saving locally" /><span>Extracting and saving locally...</span></div>}
       </section>
       <div className="actions">
-        <Button size="large" loading={isSaving} loadingLabel="Saving locally..." disabled={isOpening} onClick={() => void savePage()}>Save page</Button>
+        <Button size="large" loading={isSaving} loadingLabel="Saving locally..." disabled={isOpening} onClick={() => void savePage()}>Save Page</Button>
         <Button size="large" variant="outlined" loading={isOpening} loadingLabel="Opening..." disabled={isSaving} onClick={() => void openDashboard()}>Open dashboard</Button>
       </div>
       <p className="continuity-note">Indexing continues if this popup closes.</p>
