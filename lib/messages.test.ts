@@ -4,6 +4,7 @@ import {
   isCloseOffscreenDocumentRequest,
   isExtractedPageMessage,
   isRetryIndexingRequest,
+  isSearchProgressMessage,
   isSearchMemoryRequest,
   isRunEmbeddingProbeOffscreenRequest,
   isRunEmbeddingProbeRequest,
@@ -58,6 +59,19 @@ describe('messages validation', () => {
     expect(isRunEmbeddingProbeRequest({ type: 'RUN_EMBEDDING_PROBE', version: 1 })).toBe(true);
     expect(isRunEmbeddingProbeOffscreenRequest({ type: 'RUN_EMBEDDING_PROBE_OFFSCREEN', version: 1 })).toBe(true);
     expect(isSearchMemoryRequest({ limit: 10, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(true);
+    expect(isSearchMemoryRequest({ limit: 3, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(true);
+    expect(isSearchMemoryRequest({ limit: 5, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(true);
     expect(isSearchMemoryRequest({ limit: 0, query: 'semantic search', requestId: 'search-id', type: 'SEARCH_MEMORY', version: 1 })).toBe(false);
+  });
+
+  it('validates SEARCH_PROGRESS messages', () => {
+    for (const phase of ['preparing', 'loading-model', 'embedding-query', 'ranking']) {
+      expect(isSearchProgressMessage({ phase, requestId: 'search-id', type: 'SEARCH_PROGRESS', version: 1 })).toBe(true);
+    }
+    expect(isSearchProgressMessage({ phase: 'searching', requestId: 'search-id', type: 'SEARCH_PROGRESS', version: 1 })).toBe(false);
+    expect(isSearchProgressMessage({ phase: 'preparing', requestId: '', type: 'SEARCH_PROGRESS', version: 1 })).toBe(false);
+    expect(isSearchProgressMessage({ phase: 'preparing', requestId: 'search-id', type: 'SEARCH_PROGRESS', version: 2 })).toBe(false);
+    expect(isSearchProgressMessage({ phase: 'preparing', query: 'private query', requestId: 'search-id', type: 'SEARCH_PROGRESS', version: 1 })).toBe(false);
+    expect(isSearchProgressMessage(null)).toBe(false);
   });
 });

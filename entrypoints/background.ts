@@ -196,6 +196,8 @@ export default defineBackground(() => {
           title: savedPage.title,
           url: savedPage.url,
           savedAt: savedPage.savedAt,
+          chunkCount: savedPage.chunkCount,
+          updated: savedPage.contentRevision > 1,
           ...(extractionWarning(savedPage.extractionMethod) ? { warning: extractionWarning(savedPage.extractionMethod) } : {}),
         },
       });

@@ -33,6 +33,8 @@ export type SearchMemoryRequest = { limit: number; requestId: string; query: str
 export type SearchMemoryOffscreenRequest = { limit: number; requestId: string; query: string; type: 'SEARCH_MEMORY_OFFSCREEN'; version: 1 };
 export type CancelSearchRequest = { requestId: string; type: 'CANCEL_SEARCH'; version: 1 };
 export type CancelSearchOffscreenRequest = { requestId: string; type: 'CANCEL_SEARCH_OFFSCREEN'; version: 1 };
+export type SearchProgressPhase = 'preparing' | 'loading-model' | 'embedding-query' | 'ranking';
+export type SearchProgressMessage = { phase: SearchProgressPhase; requestId: string; type: 'SEARCH_PROGRESS'; version: 1 };
 export type DeleteAllLocalDataRequest = { type: 'DELETE_ALL_LOCAL_DATA'; version: 1 };
 
 import type { ExtractionMethod } from './page-extraction';
@@ -61,6 +63,8 @@ export type CaptureResponse =
         title: string;
         url: string;
         savedAt: number;
+        chunkCount: number;
+        updated: boolean;
         warning?: string;
       };
     }
@@ -131,6 +135,19 @@ export function isCancelSearchRequest(msg: unknown): msg is CancelSearchRequest 
 }
 export function isCancelSearchOffscreenRequest(msg: unknown): msg is CancelSearchOffscreenRequest {
   return !!msg && typeof msg === 'object' && (msg as Record<string, unknown>).type === 'CANCEL_SEARCH_OFFSCREEN' && (msg as Record<string, unknown>).version === 1 && typeof (msg as Record<string, unknown>).requestId === 'string';
+}
+
+export function isSearchProgressMessage(msg: unknown): msg is SearchProgressMessage {
+  if (!msg || typeof msg !== 'object') return false;
+  const message = msg as Record<string, unknown>;
+  return Object.keys(message).length === 4
+    && ['type', 'version', 'requestId', 'phase'].every((key) => key in message)
+    && message.type === 'SEARCH_PROGRESS'
+    && message.version === 1
+    && typeof message.requestId === 'string'
+    && message.requestId.length > 0
+    && message.requestId.length <= 128
+    && ['preparing', 'loading-model', 'embedding-query', 'ranking'].includes(message.phase as string);
 }
 
 export function isDeleteAllLocalDataRequest(msg: unknown): msg is DeleteAllLocalDataRequest {

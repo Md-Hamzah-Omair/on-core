@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { HYBRID_EXPECTED_PAGE_ORDER, HYBRID_NOW, HYBRID_RANKING_FIXTURE, rankingVector } from './fixtures/hybrid-ranking';
 import {
   DEFAULT_HYBRID_WEIGHTS,
+  DEFAULT_SEARCH_RESULT_LIMIT,
   RECENCY_HALF_LIFE_MS,
   createSearchSnippet,
   cosineSimilarity,
@@ -16,6 +17,9 @@ import {
 import { EMBEDDING_DIMENSION } from './embeddings';
 
 describe('hybrid semantic search', () => {
+  it('defaults to three results', () => {
+    expect(DEFAULT_SEARCH_RESULT_LIMIT).toBe(3);
+  });
   it('normalizes semantic queries and lexical tokens deterministically', () => {
     const valid = validateSearchQuery('  React—Memoization, react  ');
     expect(valid.valid && valid.normalized).toBe('React—Memoization, react');
@@ -98,5 +102,13 @@ describe('hybrid semantic search', () => {
   it('builds readable snippets without lexical highlighting', () => {
     expect(createSearchSnippet('word '.repeat(100))).toMatch(/\.\.\.$/);
     expect(createSearchSnippet('short hybrid passage')).toBe('short hybrid passage');
+  });
+
+  it('returns the snippet from the chunk that wins page grouping', () => {
+    const results = rankSemanticSearch(rankingVector(1), 'matching passage', [
+      { embedding: rankingVector(0.5, 0.5), pageId: 1, position: 0, savedAt: HYBRID_NOW, text: 'weaker passage', title: 'Page title', url: 'https://example.test' },
+      { embedding: rankingVector(1), pageId: 1, position: 1, savedAt: HYBRID_NOW, text: 'actual best matching passage', title: 'Page title', url: 'https://example.test' },
+    ], 3, HYBRID_NOW);
+    expect(results[0]).toMatchObject({ position: 1, snippet: 'actual best matching passage' });
   });
 });

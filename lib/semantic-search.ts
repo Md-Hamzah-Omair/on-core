@@ -2,7 +2,7 @@ import { EMBEDDING_DIMENSION, isValidEmbedding } from './embeddings';
 
 export const MIN_SEARCH_QUERY_LENGTH = 3;
 export const MAX_SEARCH_QUERY_LENGTH = 500;
-export const DEFAULT_SEARCH_RESULT_LIMIT = 10;
+export const DEFAULT_SEARCH_RESULT_LIMIT = 3;
 export const MAX_SEARCH_RESULT_LIMIT = 20;
 export const MIN_SEMANTIC_SCORE = 0.25;
 export const MIN_LEXICAL_SCORE = 0.10;

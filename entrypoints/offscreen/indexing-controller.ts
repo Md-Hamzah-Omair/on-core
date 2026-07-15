@@ -10,6 +10,7 @@ import {
   setPagesIndexingPhase,
 } from '../../lib/database';
 import { EMBEDDING_DIMENSION } from '../../lib/embeddings';
+import type { SearchProgressPhase } from '../../lib/messages';
 import { rankSemanticSearch, validateSearchQuery, validateSearchResultLimit, type SemanticSearchResult } from '../../lib/semantic-search';
 
 export class IndexingController {
@@ -18,6 +19,7 @@ export class IndexingController {
   private running = false;
   private cancelledSearches = new Set<string>();
   private inference = Promise.resolve();
+  private searchProgress: ((phase: SearchProgressPhase) => void) | undefined;
 
   constructor(
     private readonly createWorker: EmbeddingWorkerFactory,
@@ -54,20 +56,35 @@ export class IndexingController {
     this.cancelledSearches.add(requestId);
   }
 
-  async search(requestId: string, query: string, limit: number): Promise<{ results: SemanticSearchResult[]; status: 'no-indexed-content' | 'results' | 'no-results' }> {
+  async search(
+    requestId: string,
+    query: string,
+    limit: number,
+    onProgress?: (phase: SearchProgressPhase) => void,
+  ): Promise<{ candidateChunkCount: number; results: SemanticSearchResult[]; status: 'no-indexed-content' | 'results' | 'no-results' }> {
     const validation = validateSearchQuery(query);
     if (!validation.valid || !validateSearchResultLimit(limit)) throw new Error('INVALID_QUERY');
+    onProgress?.('preparing');
     const candidates = await getSemanticSearchCandidates();
-    if (candidates.length === 0) return { results: [], status: 'no-indexed-content' };
+    const candidateChunkCount = candidates.length;
+    if (candidateChunkCount === 0) return { candidateChunkCount, results: [], status: 'no-indexed-content' };
     if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
     const embedding = await this.withInference(async () => {
       if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
-      await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
+      this.searchProgress = onProgress;
+      try {
+        await this.client.initialize(this.modelBaseUrl, this.wasmBaseUrl);
+      } finally {
+        this.searchProgress = undefined;
+      }
+      if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
+      onProgress?.('embedding-query');
       return this.client.embedQuery(validation.normalized);
     });
     if (this.cancelledSearches.delete(requestId)) throw new Error('SEARCH_CANCELED');
+    onProgress?.('ranking');
     const results = rankSemanticSearch(embedding, validation.normalized, candidates, limit, Date.now());
-    return { results, status: results.length ? 'results' : 'no-results' };
+    return { candidateChunkCount, results, status: results.length ? 'results' : 'no-results' };
   }
 
   async run(): Promise<void> {
@@ -113,6 +130,7 @@ export class IndexingController {
 
   private createClient() {
     return new EmbeddingClient(this.createWorker, (status) => {
+      if (status === 'loading-model') this.searchProgress?.('loading-model');
       if (status === 'loading-model' && this.activePageIds.length > 0) {
         void setPagesIndexingPhase(this.activePageIds, 'loading-model');
       }

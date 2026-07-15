@@ -1,8 +1,8 @@
 # Local Web Memory
 
 Local Web Memory is a privacy-first Chrome extension that saves pages you
-explicitly choose, embeds them on-device, and searches them with local hybrid relevance without
-a backend.
+explicitly choose, embeds them on-device, and searches them with local hybrid
+relevance without a backend.
 
 ## Problem and solution
 
@@ -15,13 +15,15 @@ different wording.
 
 - Explicit page capture, cleaning, chunking, and duplicate URL updates
 - Packaged offline local embeddings with semantic, keyword, and recency ranking
+- Responsive light, dark, and system themes with truthful local progress
 - IndexedDB storage with per-page retry, delete, and Delete All controls
 - No accounts, telemetry, analytics, cloud inference, sync, or automatic capture
 
 ## Privacy and on-device AI
 
-Title, canonical URL, extracted plain text and article metadata, chunks, embeddings, indexing state,
-and queries stay inside the extension's IndexedDB and local worker. The bundled
+Title, canonical URL, extracted plain text and article metadata, chunks,
+embeddings, indexing state, and queries stay inside the extension's IndexedDB
+and local worker. UI preferences remain in extension-local browser storage. The bundled
 model is `Xenova/all-MiniLM-L6-v2`, revision
 `751bff37182d3f1213fa05d7196b954e230abad9`, INT8, 384 dimensions, embedding
 version 1. Transformers.js and ONNX Runtime Web run CPU/WASM inference locally.
@@ -42,7 +44,7 @@ flowchart LR
   W --> DB[(IndexedDB)]
   U --> Q[Query embedding]
   Q --> W
-  DB --> R[Local similarity ranking]
+  DB --> R[Local hybrid ranking]
   W --> R
   R --> S[Search results]
 ```
@@ -67,8 +69,8 @@ enabled, then choose **Load unpacked**.
 1. Open an HTTP(S) page and click **Save Page** in the popup.
 2. Wait for local indexing in the dashboard.
 3. Search using natural language and open a ranked result if desired.
-4. Retry failed pages, delete one page, or delete all local data from the
-   Privacy & Local Storage panel.
+4. Retry failed pages, delete one page, or delete all saved memories from the
+   local privacy panel.
 
 ## Screenshots and demo
 

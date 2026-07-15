@@ -51,7 +51,18 @@ browser.runtime.onMessage.addListener((message) => {
   }
   if (isSearchMemoryOffscreenRequest(message)) {
     if (closeTimer) clearTimeout(closeTimer);
-    return controller.search(message.requestId, message.query, message.limit)
+    return controller.search(message.requestId, message.query, message.limit, (phase) => {
+      try {
+        void browser.runtime.sendMessage({
+          phase,
+          requestId: message.requestId,
+          type: 'SEARCH_PROGRESS',
+          version: 1,
+        }).catch(() => {});
+      } catch {
+        // Progress delivery is best-effort and must not fail the search.
+      }
+    })
       .then((result) => ({ ok: true, requestId: message.requestId, ...result }))
       .catch((error: unknown) => ({ ok: false, requestId: message.requestId, code: error instanceof Error ? error.message : 'SEARCH_FAILED' }))
       .finally(scheduleClose);

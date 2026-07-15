@@ -1,12 +1,29 @@
-import { type FormEvent, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { browser } from 'wxt/browser';
+import { ToastRegion, type ToastMessage } from '../../components/ToastRegion';
 import { deletePage, getLocalDataSummary, getPageChunks, getSavedPages } from '../../lib/database';
-import { formatStorageEstimate, LOCAL_RUNTIME_DETAILS, type LocalDataSummary } from '../../lib/privacy-settings';
-import { articleMetadataLabel, extractionMethodLabel, formatSavedDate, hybridRelevanceLabel, indexingErrorMessage, isCurrentSearchResponse, searchErrorMessage } from '../../lib/dashboard-state';
-import { PROJECT_NAME, SEARCH_PLACEHOLDER } from '../../lib/project';
+import { isCurrentSearchProgress, isCurrentSearchResponse, searchErrorMessage, searchProgressLabel, formatSearchSummary, type SavedMemoryFilter } from '../../lib/dashboard-state';
+import { isSearchProgressMessage } from '../../lib/messages';
 import type { SavedPage } from '../../lib/pages';
+import type { LocalDataSummary } from '../../lib/privacy-settings';
+import { validateSearchQuery, type SemanticSearchResult } from '../../lib/semantic-search';
 import type { StoredTextChunk } from '../../lib/text-chunking';
-import { DEFAULT_SEARCH_RESULT_LIMIT, validateSearchQuery, type SemanticSearchResult } from '../../lib/semantic-search';
+import { readSearchResultLimit, writeSearchResultLimit, type SearchResultLimit } from '../../lib/ui-preferences';
+import { DashboardNavigation } from './components/DashboardNavigation';
+import { PrivacySummary } from './components/PrivacySummary';
+import { SavedMemories } from './components/SavedMemories';
+import { SearchPanel } from './components/SearchPanel';
+import { SearchResults } from './components/SearchResults';
+
+type SearchState = 'idle' | 'searching' | 'results' | 'no-results' | 'failed';
+type SearchResponse = {
+  candidateChunkCount?: number;
+  code?: string;
+  ok: boolean;
+  requestId: string;
+  results?: SemanticSearchResult[];
+  status?: 'no-indexed-content' | 'results' | 'no-results';
+};
 
 export default function App() {
   const [pages, setPages] = useState<SavedPage[]>([]);
@@ -19,75 +36,95 @@ export default function App() {
   const [deletingPageId, setDeletingPageId] = useState<number | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [retryingPageId, setRetryingPageId] = useState<number | null>(null);
+  const [filter, setFilter] = useState<SavedMemoryFilter>('all');
   const [query, setQuery] = useState('');
-  const [searchLimit, setSearchLimit] = useState(DEFAULT_SEARCH_RESULT_LIMIT);
-  const [searchState, setSearchState] = useState<'idle' | 'validating-query' | 'loading-model' | 'embedding-query' | 'searching' | 'results' | 'no-results' | 'failed'>('idle');
+  const [searchLimit, setSearchLimit] = useState<SearchResultLimit>(() => readSearchResultLimit());
+  const [searchState, setSearchState] = useState<SearchState>('idle');
+  const [searchProgress, setSearchProgress] = useState('Preparing local search...');
   const [searchError, setSearchError] = useState('');
+  const [searchSummary, setSearchSummary] = useState('');
   const [searchResults, setSearchResults] = useState<SemanticSearchResult[]>([]);
   const [summary, setSummary] = useState<LocalDataSummary | null>(null);
   const [storageUsage, setStorageUsage] = useState<number | undefined>();
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const activeSearchId = useRef<string | null>(null);
+  const activeSearchParameters = useRef<{ limit: number; query: string } | null>(null);
+  const lastSubmittedQuery = useRef('');
+  const previousIndexingStatuses = useRef<Map<number, SavedPage['indexingStatus']> | null>(null);
+  const loadedOnce = useRef(false);
+
+  function addToast(message: string, tone: ToastMessage['tone'] = 'info') {
+    setToasts((current) => [...current, { id: crypto.randomUUID(), message, tone }]);
+  }
+
+  useEffect(() => {
+    if (toasts.length === 0) return;
+    const timers = toasts.map((toast) => setTimeout(() => setToasts((current) => current.filter((item) => item.id !== toast.id)), 4000));
+    return () => timers.forEach(clearTimeout);
+  }, [toasts]);
 
   useEffect(() => () => {
-    if (activeSearchId.current) {
-      void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
-    }
+    if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
   }, []);
 
   useEffect(() => {
-    let isMounted = true;
+    const onMessage = (message: unknown) => {
+      if (isSearchProgressMessage(message) && isCurrentSearchProgress(activeSearchId.current, message.requestId)) {
+        setSearchProgress(searchProgressLabel(message.phase));
+      }
+    };
+    browser.runtime.onMessage.addListener(onMessage);
+    return () => browser.runtime.onMessage.removeListener(onMessage);
+  }, []);
 
+  useEffect(() => {
+    let mounted = true;
     async function loadPages() {
-      setIsLoading(true);
+      if (!loadedOnce.current) setIsLoading(true);
       setError('');
-
       try {
         const saved = await getSavedPages();
-        if (isMounted) {
-          setPages(saved);
-          const localSummary = await getLocalDataSummary();
-          if (isMounted) setSummary(localSummary);
-          const estimate = await navigator.storage?.estimate?.();
-          if (isMounted) setStorageUsage(estimate?.usage);
+        if (!mounted) return;
+        setPages(saved);
+        const nextStatuses = new Map(saved.flatMap((page) => page.id === undefined ? [] : [[page.id, page.indexingStatus] as const]));
+        if (previousIndexingStatuses.current) {
+          for (const page of saved) {
+            if (page.id === undefined) continue;
+            const previous = previousIndexingStatuses.current.get(page.id);
+            if ((previous === 'pending' || previous === 'indexing') && page.indexingStatus === 'indexed') addToast(`Indexed “${page.title}”.`, 'success');
+            if ((previous === 'pending' || previous === 'indexing') && page.indexingStatus === 'failed') addToast(`Indexing failed for “${page.title}”.`, 'error');
+          }
         }
+        previousIndexingStatuses.current = nextStatuses;
+        loadedOnce.current = true;
+        const [localSummary, estimate] = await Promise.all([
+          getLocalDataSummary(),
+          navigator.storage?.estimate?.().catch(() => undefined),
+        ]);
+        if (mounted) { setSummary(localSummary); setStorageUsage(estimate?.usage); }
       } catch {
-        if (isMounted) setError('Saved pages could not be loaded from local storage.');
+        if (mounted) setError('Saved pages could not be loaded from local storage.');
       } finally {
-        if (isMounted) setIsLoading(false);
+        if (mounted) setIsLoading(false);
       }
     }
-
     void loadPages();
-    const refreshOnFocus = () => {
-      void loadPages();
-    };
+    const refreshOnFocus = () => void loadPages();
     window.addEventListener('focus', refreshOnFocus);
-
-    return () => {
-      isMounted = false;
-      window.removeEventListener('focus', refreshOnFocus);
-    };
+    return () => { mounted = false; window.removeEventListener('focus', refreshOnFocus); };
   }, [refreshKey]);
 
   useEffect(() => {
     if (!pages.some((page) => page.indexingStatus === 'pending' || page.indexingStatus === 'indexing')) return;
-
-    const intervalId = setInterval(() => {
-      setRefreshKey((value) => value + 1);
-    }, 1000);
+    const intervalId = setInterval(() => setRefreshKey((value) => value + 1), 1000);
     return () => clearInterval(intervalId);
   }, [pages]);
 
   async function toggleChunks(pageId: number) {
-    if (expandedPageId === pageId) {
-      setExpandedPageId(null);
-      return;
-    }
-
+    if (expandedPageId === pageId) { setExpandedPageId(null); return; }
     setExpandedPageId(pageId);
     if (chunkPreviews[pageId]) return;
-
     setLoadingChunkPageId(pageId);
     setPageErrors((current) => ({ ...current, [pageId]: '' }));
     try {
@@ -95,294 +132,134 @@ export default function App() {
       setChunkPreviews((current) => ({ ...current, [pageId]: chunks }));
     } catch {
       setPageErrors((current) => ({ ...current, [pageId]: 'Chunks could not be loaded from local storage.' }));
-    } finally {
-      setLoadingChunkPageId(null);
-    }
+    } finally { setLoadingChunkPageId(null); }
   }
 
-  async function removePage(page: SavedPage) {
-    if (page.id === undefined || !window.confirm(`Delete "${page.title}" from local memory?`)) return;
-
+  async function removePage(page: SavedPage): Promise<boolean> {
+    if (page.id === undefined) return false;
+    if (activeSearchId.current) {
+      void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
+      activeSearchId.current = null;
+      activeSearchParameters.current = null;
+      setSearchState(searchResults.length ? 'results' : 'idle');
+    }
     setDeletingPageId(page.id);
     setPageErrors((current) => ({ ...current, [page.id!]: '' }));
     try {
       await deletePage(page.id);
       setPages((current) => current.filter((savedPage) => savedPage.id !== page.id));
-      setChunkPreviews((current) => {
-        const next = { ...current };
-        delete next[page.id!];
-        return next;
-      });
+      setChunkPreviews((current) => { const next = { ...current }; delete next[page.id!]; return next; });
       setExpandedPageId((current) => current === page.id ? null : current);
       setSearchResults((current) => current.filter((result) => result.pageId !== page.id));
+      addToast('Saved memory deleted.', 'success');
       setRefreshKey((value) => value + 1);
+      return true;
     } catch {
       setPageErrors((current) => ({ ...current, [page.id!]: 'This page could not be deleted from local storage.' }));
-    } finally {
-      setDeletingPageId(null);
-    }
+      return false;
+    } finally { setDeletingPageId(null); }
   }
 
-  async function removeAllPages() {
-    if (!pages.length || !window.confirm(`Delete all ${pages.length} saved pages and their chunks from this browser? This cannot be undone.`)) return;
+  async function removeAllPages(): Promise<boolean> {
     setIsDeletingAll(true);
+    if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
     try {
       const response = await browser.runtime.sendMessage({ type: 'DELETE_ALL_LOCAL_DATA', version: 1 }) as { ok?: boolean };
       if (!response.ok) throw new Error('Delete all was rejected.');
       activeSearchId.current = null;
+      activeSearchParameters.current = null;
+      lastSubmittedQuery.current = '';
       setPages([]); setChunkPreviews({}); setExpandedPageId(null); setSearchResults([]); setSearchState('idle'); setQuery(''); setSummary(null); setStorageUsage(undefined);
+      addToast('All saved memories were deleted.', 'success');
+      return true;
     } catch {
-      setError('All local data could not be deleted. Please try again.');
-    } finally {
-      setIsDeletingAll(false);
-    }
+      setError('All saved memories could not be deleted. Please try again.');
+      return false;
+    } finally { setIsDeletingAll(false); }
   }
 
   async function retryIndexing(pageId: number) {
     setRetryingPageId(pageId);
     setPageErrors((current) => ({ ...current, [pageId]: '' }));
     try {
-      const response = await browser.runtime.sendMessage({
-        pageId,
-        type: 'RETRY_PAGE_INDEXING',
-        version: 1,
-      }) as { ok?: boolean };
+      const response = await browser.runtime.sendMessage({ pageId, type: 'RETRY_PAGE_INDEXING', version: 1 }) as { ok?: boolean };
       if (!response.ok) throw new Error('Retry was rejected.');
+      addToast('Indexing retry started.');
       setRefreshKey((value) => value + 1);
     } catch {
       setPageErrors((current) => ({ ...current, [pageId]: 'Indexing could not be restarted. Please try again.' }));
+    } finally { setRetryingPageId(null); }
+  }
+
+  async function executeSearch(normalizedQuery: string, limit: SearchResultLimit) {
+    const active = activeSearchParameters.current;
+    if (activeSearchId.current && active?.query === normalizedQuery && active.limit === limit) return;
+    if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
+    const requestId = crypto.randomUUID();
+    const startedAt = performance.now();
+    activeSearchId.current = requestId;
+    activeSearchParameters.current = { limit, query: normalizedQuery };
+    lastSubmittedQuery.current = normalizedQuery;
+    setSearchState('searching'); setSearchProgress('Preparing local search...'); setSearchError(''); setSearchSummary(''); setSearchResults([]);
+    try {
+      const response = await browser.runtime.sendMessage({ limit, query: normalizedQuery, requestId, type: 'SEARCH_MEMORY', version: 1 }) as SearchResponse;
+      if (!isCurrentSearchResponse(activeSearchId.current, requestId) || response.requestId !== requestId) return;
+      if (!response.ok) throw new Error(response.code ?? 'SEARCH_FAILED');
+      const results = response.results ?? [];
+      setSearchResults(results);
+      setSearchSummary(formatSearchSummary(results.length, response.candidateChunkCount ?? 0, performance.now() - startedAt));
+      if (response.status === 'no-indexed-content') setSearchError(searchErrorMessage('NO_INDEXED_CONTENT'));
+      setSearchState(response.status === 'results' ? 'results' : 'no-results');
+    } catch (caught) {
+      if (activeSearchId.current === requestId) { setSearchError(searchErrorMessage(caught instanceof Error ? caught.message : 'SEARCH_FAILED')); setSearchState('failed'); }
     } finally {
-      setRetryingPageId(null);
+      if (activeSearchId.current === requestId) { activeSearchId.current = null; activeSearchParameters.current = null; }
     }
   }
 
-  async function submitSearch(event: FormEvent<HTMLFormElement>) {
+  function submitSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (activeSearchId.current) {
-      void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
-      activeSearchId.current = null;
-    }
     const validation = validateSearchQuery(query);
-    setSearchState('validating-query');
     setSearchError('');
     if (!validation.valid) {
-      setSearchError(validation.message);
-      setSearchState('failed');
+      if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
+      activeSearchId.current = null; activeSearchParameters.current = null; lastSubmittedQuery.current = '';
+      setSearchResults([]); setSearchSummary(''); setSearchError(validation.message); setSearchState('failed');
       return;
     }
-    const requestId = crypto.randomUUID();
-    activeSearchId.current = requestId;
-    setSearchState('searching');
-    try {
-      const response = await browser.runtime.sendMessage({ limit: searchLimit, query: validation.normalized, requestId, type: 'SEARCH_MEMORY', version: 1 }) as { ok: boolean; requestId: string; results?: SemanticSearchResult[]; status?: string; code?: string };
-      if (!isCurrentSearchResponse(activeSearchId.current, requestId) || response.requestId !== requestId) return;
-      if (!response.ok) throw new Error(response.code ?? 'SEARCH_FAILED');
-      setSearchResults(response.results ?? []);
-      if (response.status === 'no-indexed-content') setSearchError(searchErrorMessage('NO_INDEXED_CONTENT'));
-      setSearchState(response.status === 'results' ? 'results' : 'no-results');
-    } catch (error) {
-      if (activeSearchId.current === requestId) {
-        setSearchError(searchErrorMessage(error instanceof Error ? error.message : 'SEARCH_FAILED'));
-        setSearchState('failed');
-      }
-    } finally {
-      if (activeSearchId.current === requestId) activeSearchId.current = null;
-    }
+    void executeSearch(validation.normalized, searchLimit);
+  }
+
+  function changeSearchLimit(limit: SearchResultLimit) {
+    writeSearchResultLimit(limit);
+    setSearchLimit(limit);
+    if (lastSubmittedQuery.current) void executeSearch(lastSubmittedQuery.current, limit);
   }
 
   function clearSearch() {
     if (activeSearchId.current) void browser.runtime.sendMessage({ requestId: activeSearchId.current, type: 'CANCEL_SEARCH', version: 1 });
-    activeSearchId.current = null;
-    setQuery('');
-    setSearchResults([]);
-    setSearchError('');
-    setSearchState('idle');
+    activeSearchId.current = null; activeSearchParameters.current = null; lastSubmittedQuery.current = '';
+    setQuery(''); setSearchResults([]); setSearchError(''); setSearchSummary(''); setSearchState('idle');
   }
 
-  function getHostname(urlStr: string): string {
-    try {
-      return new URL(urlStr).hostname;
-    } catch {
-      return urlStr;
-    }
-  }
-
-  function formatDate(timestamp: number): string {
-    return formatSavedDate(timestamp);
-  }
-
-  function getSnippet(text: string): string {
-    return text.length > 200 ? `${text.slice(0, 200)}...` : text;
-  }
-
-  function indexingLabel(page: SavedPage): string {
-    if (page.indexingStatus === 'indexed') return 'Indexed';
-    if (page.indexingStatus === 'failed') return 'Failed';
-    if (page.indexingPhase === 'loading-model') return 'Loading model';
-    if (page.indexingStatus === 'indexing') return `Indexing ${page.indexedChunkCount} of ${page.chunkCount}`;
-    return 'Not indexed';
-  }
-
+  const searching = searchState === 'searching';
   return (
-    <main>
-      <header className="dashboard-header">
-        <span className="mark">LWM</span>
-        <span>{PROJECT_NAME}</span>
-      </header>
-
-      <div className="layout-grid">
-        <section className="hero-section">
-          <p className="eyebrow">Private, local web memory</p>
-          <h1>Your corner of the web,<br />remembered locally.</h1>
-
-          <form className="search-box" onSubmit={(event) => void submitSearch(event)}>
-            <label htmlFor="memory-search">Search your web memory</label>
-            <input id="memory-search" type="search" maxLength={500} placeholder={SEARCH_PLACEHOLDER} value={query} onChange={(event) => setQuery(event.target.value)} />
-            <div className="search-actions">
-              <select aria-label="Search result limit" value={searchLimit} onChange={(event) => setSearchLimit(Number(event.target.value))}>
-                <option value={5}>5 results</option><option value={10}>10 results</option><option value={20}>20 results</option>
-              </select>
-              <button type="submit" disabled={searchState === 'searching'}>Search locally</button>
-              {searchState !== 'idle' && <button type="button" onClick={clearSearch}>Clear</button>}
-            </div>
-            {searchState === 'searching' && <p className="search-state" role="status">Searching locally...</p>}
-            {searchError && <p className="page-error" role="alert">{searchError}</p>}
-          </form>
-
-          <aside className="milestone-badge">
-            <strong>Private Hybrid Search</strong>
-            <p>Meaning, keywords, and save recency are ranked on this device.</p>
-          </aside>
-          <section className="privacy-panel" aria-label="Privacy and local storage">
-            <h2>Privacy &amp; Local Storage</h2>
-            <p>Capture happens only when you click Save Page. No telemetry, cloud inference, sync, or automatic capture is used.</p>
-            <p><strong>Permissions:</strong> activeTab for your explicit save action, scripting for one-time extraction, and offscreen for local model work. Host permissions: none.</p>
-            <p><strong>Model:</strong> {LOCAL_RUNTIME_DETAILS.modelId} ({LOCAL_RUNTIME_DETAILS.dimension} dimensions, embedding v{LOCAL_RUNTIME_DETAILS.embeddingVersion})</p>
-            <p><strong>Runtime:</strong> {LOCAL_RUNTIME_DETAILS.runtime}. Bundled locally; external inference: none.</p>
-            <p><strong>Saved:</strong> {summary?.pageCount ?? 0} pages, {summary?.chunkCount ?? 0} chunks. Approximate browser storage: {formatStorageEstimate(storageUsage)}.</p>
-            <p>Stored data remains in this browser profile until deleted, extension data is cleared, or the extension is uninstalled. It is not application-level encrypted. Opening an original page contacts that website.</p>
-            <button type="button" className="delete-all" disabled={isDeletingAll || pages.length === 0} onClick={() => void removeAllPages()}>{isDeletingAll ? 'Deleting all...' : 'Delete all local data'}</button>
-          </section>
-        </section>
-
-        <section className="feed-section">
-          <h2>{searchState === 'results' || searchState === 'no-results' ? 'Search Results' : `Saved Memories (${pages.length})`}</h2>
-
-          {searchState === 'results' ? (
-            <div className="pages-list">{searchResults.map((result) => (
-              <article key={result.pageId} className="page-card search-result">
-                <header className="card-header"><span className="card-domain">{getHostname(result.url)}</span><span className="card-date">{formatDate(result.savedAt)}</span></header>
-                <h3 className="card-title">{result.title}</h3>
-                <p className="semantic-label">{hybridRelevanceLabel(result.score)}</p>
-                <p className="card-snippet semantic-snippet">{result.snippet}</p>
-                <a className="open-original" href={result.url} target="_blank" rel="noreferrer">Open original</a>
-              </article>
-            ))}</div>
-          ) : searchState === 'no-results' ? (
-            <div className="empty-state"><p>No relevant matches found.</p><span>Try a different description or wait for pages to finish indexing.</span></div>
-          ) : isLoading ? (
-            <div className="loading" role="status">Loading your saved pages...</div>
-          ) : error ? (
-            <div className="error-box" role="alert">{error}</div>
-          ) : pages.length === 0 ? (
-            <div className="empty-state">
-              <p>Your web memory is empty.</p>
-              <span>Open any webpage and click <strong>Save Page</strong> from the extension popup to save it locally.</span>
-            </div>
-          ) : (
-            <div className="pages-list">
-              {pages.map((page) => {
-                const pageId = page.id;
-                const chunks = pageId === undefined ? undefined : chunkPreviews[pageId];
-                const isExpanded = pageId === expandedPageId;
-                const isLoadingChunks = pageId === loadingChunkPageId;
-                const isDeleting = pageId === deletingPageId;
-
-                return (
-                  <article key={page.id ?? page.url} className="page-card">
-                    <header className="card-header">
-                      <span className="card-domain">{getHostname(page.url)}</span>
-                      <span className="card-date">{formatDate(page.savedAt)}</span>
-                    </header>
-
-                    <h3 className="card-title">{page.title}</h3>
-                    <p className="card-snippet">{getSnippet(page.text)}</p>
-                    <p className="card-metadata">
-                       {extractionMethodLabel(page.extractionMethod)} · {(page.cleanedTextLength ?? page.text.length).toLocaleString()} extracted characters · {page.chunkCount ?? 0} chunks
-                    </p>
-                    {articleMetadataLabel(page) && <p className="card-article-metadata">{articleMetadataLabel(page)}</p>}
-                    <p className={`indexing-status indexing-status-${page.indexingStatus}`}>
-                      {indexingLabel(page)} · {page.indexedChunkCount} of {page.chunkCount} embedded
-                    </p>
-                    {page.indexingError && <p className="page-error">{indexingErrorMessage(page.indexingError)}</p>}
-
-                    {page.truncated && (
-                      <span className="badge badge-warning" title="This page was very large and was truncated to 500,000 characters.">
-                        Truncated
-                      </span>
-                    )}
-
-                    {pageId !== undefined && (
-                      <div className="card-actions">
-                        <button
-                          type="button"
-                          className="chunk-toggle"
-                          aria-expanded={isExpanded}
-                          onClick={() => void toggleChunks(pageId)}
-                        >
-                          {isExpanded ? 'Hide chunks' : 'Show chunks'}
-                        </button>
-                        <button
-                          type="button"
-                          className="delete-page"
-                          disabled={isDeleting}
-                          aria-label={`Delete ${page.title}`}
-                          onClick={() => void removePage(page)}
-                        >
-                          {isDeleting ? 'Deleting...' : 'Delete'}
-                        </button>
-                        {page.indexingStatus !== 'indexed' && (
-                          <button
-                            type="button"
-                            className="retry-indexing"
-                            disabled={retryingPageId === pageId}
-                            onClick={() => void retryIndexing(pageId)}
-                          >
-                            {retryingPageId === pageId ? 'Retrying...' : 'Retry indexing'}
-                          </button>
-                        )}
-                      </div>
-                    )}
-
-                    {pageId !== undefined && pageErrors[pageId] && (
-                      <p className="page-error" role="alert">{pageErrors[pageId]}</p>
-                    )}
-
-                    {isExpanded && pageId !== undefined && (
-                      <section className="chunk-preview" aria-label={`Chunks for ${page.title}`}>
-                        {isLoadingChunks ? (
-                          <p className="loading">Loading chunks...</p>
-                        ) : chunks?.length ? (
-                          chunks.map((chunk) => (
-                            <div key={chunk.position} className="chunk-item">
-                              <strong>Chunk {chunk.position + 1}</strong>
-                              <span>{chunk.characterCount.toLocaleString()} characters</span>
-                              <span>{chunk.embeddingStatus}{chunk.embeddingDimension ? ` · ${chunk.embeddingDimension} dimensions` : ''}</span>
-                              <p>{chunk.text}</p>
-                            </div>
-                          ))
-                        ) : (
-                          <p className="chunk-empty">No chunks are available for this page.</p>
-                        )}
-                      </section>
-                    )}
-                  </article>
-                );
-              })}
-            </div>
-          )}
-        </section>
+    <>
+      <a className="skip-link" href="#search">Skip to search</a>
+      <div className="dashboard-app">
+        <DashboardNavigation />
+        <main className="dashboard-shell">
+          <SearchPanel error={searchError} isSearching={searching} limit={searchLimit} onClear={clearSearch} onLimitChange={changeSearchLimit} onQueryChange={setQuery} onSubmit={submitSearch} progressLabel={searchProgress} query={query} showClear={searchState !== 'idle'} />
+          <SearchResults isLoading={searching} results={searchResults} showNoResults={searchState === 'no-results'} summary={searchSummary} />
+          {error && <p className="page-load-error" role="alert">{error}</p>}
+          <div className="management-grid">
+            <SavedMemories chunkPreviews={chunkPreviews} deletingPageId={deletingPageId} expandedPageId={expandedPageId} filter={filter} loadingChunkPageId={loadingChunkPageId} onDelete={removePage} onFilterChange={setFilter} onRetry={retryIndexing} onToggleChunks={toggleChunks} pageErrors={pageErrors} pages={pages} retryingPageId={retryingPageId} />
+            <PrivacySummary deleting={isDeletingAll} onDeleteAll={removeAllPages} storageUsage={storageUsage} summary={summary} />
+          </div>
+          {isLoading && <p className="initial-loading" role="status">Loading saved memories...</p>}
+        </main>
       </div>
-    </main>
+      <ToastRegion toasts={toasts} onDismiss={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))} />
+    </>
   );
 }
